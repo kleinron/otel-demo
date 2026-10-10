@@ -23,7 +23,10 @@
     "teardown:rehearsal": "tsx scripts/teardown-rehearsal.ts",
     "deploy:check": "tsx scripts/deploy-check.ts",
     "grafana:url": "tsx scripts/grafana-url.ts",
-    "seed": "tsx scripts/seed.ts"
+    "seed": "tsx scripts/seed.ts",
+    "seed:aws": "tsx scripts/seed-aws.ts",
+    "loadgen:start": "tsx scripts/loadgen-scale.ts 1",
+    "loadgen:stop": "tsx scripts/loadgen-scale.ts 0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

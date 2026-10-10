@@ -33,9 +33,11 @@ import {
   GRAFANA_PORT,
   GRAFANA_SERVICE_NAME,
   LOADGEN_NAME,
+  METRICS_LOG_GROUP,
   SERVICE_PORTS,
   SERVICES,
   serviceLogGroup,
+  workloadServiceName,
   type ServiceName,
 } from '../names.js';
 
@@ -116,6 +118,8 @@ export class DemoStack extends Stack {
 
     const adotLogs = logGroup(this, 'AdotLogs', ADOT_LOG_GROUP);
     adotLogs.grantWrite(taskRole);
+    // The EMF exporter writes metrics here. Its default group (/metrics/otel-demo) is not granted.
+    logGroup(this, 'MetricsLogs', METRICS_LOG_GROUP).grantWrite(taskRole);
 
     const groups = new Map<string, ec2.SecurityGroup>();
     const loadgenSg = namedGroup(
@@ -275,6 +279,8 @@ export class DemoStack extends Stack {
         ...baseEnv(LOADGEN_NAME),
         SHOP_URL: `http://${shopAlb.loadBalancerDnsName}`,
       },
+      // A deploy must leave the generator stopped. Raise the count with npm run loadgen:start.
+      desiredCount: 0,
     });
 
     this.grafana(cluster, executionRole, grafanaTaskSg, grafanaLogs, alertLogs, [
@@ -334,10 +340,10 @@ export class DemoStack extends Stack {
       logging: ecs.LogDrivers.awsLogs({ logGroup: adotLogs, streamPrefix: options.name }),
     });
     return new ecs.FargateService(this, `${title(options.name)}Service`, {
-      serviceName: `otel-demo-${options.name}`,
+      serviceName: workloadServiceName(options.name),
       cluster,
       taskDefinition: task,
-      desiredCount: 1,
+      desiredCount: options.desiredCount ?? 1,
       assignPublicIp: true,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       securityGroups: [options.securityGroup],
@@ -485,7 +491,7 @@ export class DemoStack extends Stack {
       logging: ecs.LogDrivers.awsLogs({ logGroup: alertLogs, streamPrefix: 'state' }),
     });
 
-    new ecs.FargateService(this, 'GrafanaService', {
+    const grafanaService = new ecs.FargateService(this, 'GrafanaService', {
       serviceName: GRAFANA_SERVICE_NAME,
       cluster,
       taskDefinition: task,
@@ -498,6 +504,9 @@ export class DemoStack extends Stack {
       maxHealthyPercent: 100,
       circuitBreaker: { rollback: true },
     });
+    // The shared execution role's policy waits on the database secrets. Without this the
+    // task starts first, cannot read the Grafana secret, and trips the circuit breaker.
+    grafanaService.node.addDependency(executionRole);
   }
 }
 
@@ -511,6 +520,8 @@ interface WorkloadOptions {
   secrets?: Record<string, ecs.Secret>;
   port?: number;
   namespace?: servicediscovery.INamespace;
+  /** Defaults to 1. The load generator passes 0 so a deploy does not start it. */
+  desiredCount?: number;
 }
 
 function savedQuery(
@@ -595,6 +606,7 @@ function namedGroup(
 function baseEnv(service: string): Record<string, string> {
   return {
     HOST: allInterfacesHost(),
+    // Task environment, read when the process starts. Override the task to use debug.
     LOG_LEVEL: 'info',
     OTEL_LOG_LEVEL: 'error',
     OTEL_SERVICE_NAME: service,

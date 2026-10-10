@@ -156,6 +156,7 @@ describe('alert webhook receiver', () => {
     expect(formatAlertLines({ status: 'firing' }, '2026-10-10T00:00:00.000Z')).toEqual([]);
     const script = receiverScript();
     expect(script).toContain('localhost');
+    expect(script).toContain('const __name = (target) => target');
     expect(script).toContain('grafana_alert_state_change');
     expect(script).not.toMatch(/\d+\.\d+\.\d+\.\d+/);
   });
