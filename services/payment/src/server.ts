@@ -1,11 +1,21 @@
 import {
+  ExpectedSideEffectFailure,
   FaultInjectedError,
   routeOperation,
+  withLoggedWrites,
+  withSideEffectLog,
   type FaultController,
   type HttpMetrics,
 } from '@otel-demo/telemetry';
 import type { Sql } from '@otel-demo/db';
-import { inRequest, jsonBody, registerSpanLifecycle, routeParam, spanOf } from '@otel-demo/httpkit';
+import {
+  inRequest,
+  jsonBody,
+  registerAccessLog,
+  registerSpanLifecycle,
+  routeParam,
+  spanOf,
+} from '@otel-demo/httpkit';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { createPaymentRepo, isPaymentStatus, type PaymentRepo } from './repo.js';
@@ -25,8 +35,10 @@ export interface BuildAppOptions {
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false });
-  const repo = options.repo ?? (options.sql ? createPaymentRepo(options.sql) : undefined);
+  const sql = options.sql ? withLoggedWrites(options.sql, options.logger) : undefined;
+  const repo = options.repo ?? (sql ? createPaymentRepo(sql) : undefined);
   const latencyMs = options.latencyMs ?? 0;
+  registerAccessLog(app, options.logger);
   registerSpanLifecycle(app, SERVICE_NAME);
   app.addHook('onResponse', async (request, reply) => {
     options.metrics?.record({
@@ -44,10 +56,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       if (!repo) {
         return reply.code(503).send({ error: 'database_unconfigured' });
       }
-      const fault = await injectFault(options, request, reply, 'charge');
-      if (fault) {
-        return fault;
-      }
       const body = jsonBody(request);
       const orderId = typeof body.orderId === 'string' ? body.orderId.trim() : '';
       const amountCents = body.amountCents;
@@ -63,24 +71,54 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       if (!currency) {
         return reply.code(400).send({ error: 'invalid_charge' });
       }
-      const existing = await repo.get(orderId);
-      if (existing) {
-        options.logger?.info({ orderId, status: existing.status }, 'recorded charge');
-        return reply.code(200).send(existing);
+      try {
+        const charge = await withSideEffectLog(
+          options.logger,
+          { action: 'payment-charge', orderId },
+          async () => {
+            await runFault(options, request, 'charge');
+            const existing = await repo.get(orderId);
+            if (existing) {
+              if (existing.status === 'declined') {
+                throw new ExpectedSideEffectFailure('declined', existing);
+              }
+              return existing;
+            }
+            const outcome = body.outcome === undefined ? 'authorized' : body.outcome;
+            if (
+              typeof outcome !== 'string' ||
+              !isPaymentStatus(outcome) ||
+              outcome === 'captured'
+            ) {
+              throw new ExpectedSideEffectFailure('invalid_outcome');
+            }
+            await pause(latencyMs);
+            const created = await repo.create({
+              orderId,
+              amountCents,
+              currency,
+              status: outcome,
+            });
+            if (created.status === 'declined') {
+              throw new ExpectedSideEffectFailure('declined', created);
+            }
+            return created;
+          },
+        );
+        return reply.code(200).send(charge);
+      } catch (error) {
+        const fault = faultReply(error, reply);
+        if (fault) {
+          return fault;
+        }
+        if (error instanceof ExpectedSideEffectFailure && error.outcome === 'declined') {
+          return reply.code(200).send(error.result);
+        }
+        if (error instanceof ExpectedSideEffectFailure && error.outcome === 'invalid_outcome') {
+          return reply.code(400).send({ error: 'invalid_outcome' });
+        }
+        throw error;
       }
-      const outcome = body.outcome === undefined ? 'authorized' : body.outcome;
-      if (typeof outcome !== 'string' || !isPaymentStatus(outcome) || outcome === 'captured') {
-        return reply.code(400).send({ error: 'invalid_outcome' });
-      }
-      await pause(latencyMs);
-      const charge = await repo.create({
-        orderId,
-        amountCents,
-        currency,
-        status: outcome,
-      });
-      options.logger?.info({ orderId, status: charge.status }, 'recorded charge');
-      return reply.code(200).send(charge);
     }),
   );
 
@@ -89,26 +127,49 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       if (!repo) {
         return reply.code(503).send({ error: 'database_unconfigured' });
       }
-      const fault = await injectFault(options, request, reply, 'capture');
-      if (fault) {
-        return fault;
-      }
       const orderId = routeParam(request, 'orderId');
-      const existing = await repo.get(orderId);
-      if (!existing) {
-        return reply.code(404).send({ error: 'not_found', orderId });
+      try {
+        const captured = await withSideEffectLog(
+          options.logger,
+          { action: 'payment-capture', orderId },
+          async () => {
+            await runFault(options, request, 'capture');
+            const existing = await repo.get(orderId);
+            if (!existing) {
+              throw new ExpectedSideEffectFailure('not_found');
+            }
+            if (existing.status === 'captured') {
+              return existing;
+            }
+            if (existing.status !== 'authorized') {
+              throw new ExpectedSideEffectFailure('not_capturable', existing);
+            }
+            await pause(latencyMs);
+            const updated = await repo.updateStatus(orderId, 'captured');
+            if (!updated) {
+              throw new ExpectedSideEffectFailure('not_found');
+            }
+            return updated;
+          },
+        );
+        return reply.code(200).send(captured);
+      } catch (error) {
+        const fault = faultReply(error, reply);
+        if (fault) {
+          return fault;
+        }
+        if (error instanceof ExpectedSideEffectFailure && error.outcome === 'not_found') {
+          return reply.code(404).send({ error: 'not_found', orderId });
+        }
+        if (error instanceof ExpectedSideEffectFailure && error.outcome === 'not_capturable') {
+          const status =
+            error.result && typeof error.result === 'object' && 'status' in error.result
+              ? (error.result as { status?: unknown }).status
+              : undefined;
+          return reply.code(400).send({ error: 'not_capturable', orderId, status });
+        }
+        throw error;
       }
-      if (existing.status === 'captured') {
-        options.logger?.info({ orderId, status: existing.status }, 'captured charge');
-        return reply.code(200).send(existing);
-      }
-      if (existing.status !== 'authorized') {
-        return reply.code(400).send({ error: 'not_capturable', orderId, status: existing.status });
-      }
-      await pause(latencyMs);
-      const captured = await repo.updateStatus(orderId, 'captured');
-      options.logger?.info({ orderId, status: 'captured' }, 'captured charge');
-      return reply.code(200).send(captured);
     }),
   );
 
@@ -128,31 +189,28 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   return app;
 }
 
-async function injectFault(
+async function runFault(
   options: BuildAppOptions,
   request: FastifyRequest,
-  reply: FastifyReply,
   operation: string,
-): Promise<FastifyReply | undefined> {
+): Promise<void> {
   const span = spanOf(request);
   if (!span || !options.faults) {
+    return;
+  }
+  await options.faults.apply({ service: SERVICE_NAME, operation }, span);
+}
+
+function faultReply(error: unknown, reply: FastifyReply): FastifyReply | undefined {
+  if (!(error instanceof FaultInjectedError)) {
     return undefined;
   }
-  try {
-    await options.faults.apply({ service: SERVICE_NAME, operation }, span);
-    return undefined;
-  } catch (error) {
-    if (!(error instanceof FaultInjectedError)) {
-      throw error;
-    }
-    options.logger?.error({ faultId: error.faultId, faultType: error.faultType }, 'fault injected');
-    const status = error.faultType === 'timeout' ? 504 : 500;
-    return reply.code(status).send({
-      error: 'fault',
-      faultId: error.faultId,
-      faultType: error.faultType,
-    });
-  }
+  const status = error.faultType === 'timeout' ? 504 : 500;
+  return reply.code(status).send({
+    error: 'fault',
+    faultId: error.faultId,
+    faultType: error.faultType,
+  });
 }
 
 function pause(ms: number): Promise<void> {

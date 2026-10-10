@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { SpanStatusCode, type Span } from '@opentelemetry/api';
+import { markFaultFlag } from './context.js';
 import {
   FAULT_ID_ATTRIBUTE,
   FAULT_INJECTED_ATTRIBUTE,
@@ -105,6 +106,7 @@ export async function applyMatchedFault(
     noteConfiguredFault({ enabled: true, faults: matched }, target, span);
     return;
   }
+  markFaultFlag(FAULT_INJECTED_ATTRIBUTE);
   span.setAttribute(FAULT_INJECTED_ATTRIBUTE, true);
   span.setAttribute(FAULT_ID_ATTRIBUTE, [selected.id]);
   span.setAttribute(FAULT_TYPE_ATTRIBUTE, [selected.type]);

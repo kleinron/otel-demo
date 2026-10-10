@@ -108,6 +108,32 @@ describe('structured logs', () => {
     expect(JSON.stringify(line)).not.toContain(accessKey);
   });
 
+  it('reads LOG_LEVEL from the environment when the logger is created', () => {
+    const previous = process.env.LOG_LEVEL;
+    process.env.LOG_LEVEL = 'debug';
+    try {
+      const { logger, lines } = captureLogger('shop');
+      logger.debug({ action: 'payment-charge' }, 'about to payment-charge');
+      expect(lines).toHaveLength(1);
+      expect(lines[0]?.msg).toBe('about to payment-charge');
+    } finally {
+      if (previous === undefined) {
+        delete process.env.LOG_LEVEL;
+      } else {
+        process.env.LOG_LEVEL = previous;
+      }
+    }
+
+    const quiet = captureLogger('shop');
+    quiet.logger.debug({ action: 'payment-charge' }, 'about to payment-charge');
+    expect(quiet.lines).toHaveLength(0);
+    quiet.logger.info(
+      { action: 'payment-charge', outcome: 'success', duration_ms: 1 },
+      'payment-charge succeeded',
+    );
+    expect(quiet.lines).toHaveLength(1);
+  });
+
   it('redacts secret bindings on child loggers', () => {
     const { logger, lines } = captureLogger('payment');
     logger.child({ apiKey: 'child-secret', orderId: 'ord_7' }).info('captured');

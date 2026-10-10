@@ -1,6 +1,11 @@
 import { context, isSpanContextValid, trace } from '@opentelemetry/api';
 import pino, { type DestinationStream, type Logger } from 'pino';
-import { currentOrderId, ORDER_ID_FIELD } from './context.js';
+import {
+  currentCustomerHash,
+  currentFaultFlags,
+  currentOrderId,
+  ORDER_ID_FIELD,
+} from './context.js';
 import { redactLogValue, redactSensitiveText } from './redact.js';
 import { toXrayTraceId } from './xray.js';
 
@@ -52,8 +57,13 @@ const REDACT_PATHS = [
 /**
  * JSON logger. Each line includes `service`, active `trace_id` / `span_id`,
  * the X-Ray encoding of the trace id, and `orderId` when the call or the
- * active context has one. Emails, phone numbers, and secret fields are
+ * active context has one. A customer hash and fault flags are added when the
+ * request context has them. Emails, phone numbers, and secret fields are
  * redacted in the logger before the line is written.
+ *
+ * `level` is read from `LOG_LEVEL` when the process creates the logger
+ * (default `info`). Debug lines such as `about to …` stay off until the
+ * environment sets `LOG_LEVEL=debug`. No image rebuild is required.
  */
 export function createLogger(options: LoggerOptions): Logger {
   const level = options.level ?? process.env.LOG_LEVEL ?? 'info';
@@ -96,8 +106,8 @@ export function createLogger(options: LoggerOptions): Logger {
   );
 }
 
-function traceMixin(): Record<string, string> {
-  const fields: Record<string, string> = {};
+function traceMixin(): Record<string, string | true> {
+  const fields: Record<string, string | true> = {};
   const span = trace.getSpan(context.active());
   if (span && isSpanContextValid(span.spanContext())) {
     const spanContext = span.spanContext();
@@ -108,6 +118,17 @@ function traceMixin(): Record<string, string> {
   const orderId = currentOrderId();
   if (orderId) {
     fields[ORDER_ID_FIELD] = orderId;
+  }
+  const customerHashValue = currentCustomerHash();
+  if (customerHashValue) {
+    fields.customer_hash = customerHashValue;
+  }
+  const flags = currentFaultFlags();
+  if (flags['fault.configured']) {
+    fields['fault.configured'] = true;
+  }
+  if (flags['fault.injected']) {
+    fields['fault.injected'] = true;
   }
   return fields;
 }

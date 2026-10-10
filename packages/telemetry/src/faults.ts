@@ -1,4 +1,5 @@
 import { type Span } from '@opentelemetry/api';
+import { markFaultFlag } from './context.js';
 
 export const FAULT_TYPES = ['delay', 'error', 'drop', 'timeout'] as const;
 
@@ -89,6 +90,7 @@ export function noteConfiguredFault(
   if (matched.length === 0) {
     return [];
   }
+  markFaultFlag('fault.configured');
   span.setAttribute(FAULT_CONFIGURED_ATTRIBUTE, true);
   span.setAttribute(
     FAULT_ID_ATTRIBUTE,

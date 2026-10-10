@@ -30,13 +30,32 @@ Host resource detection is off. A machine address is not attached automatically.
 
 ## Logs
 
-`createLogger({ service })` writes one JSON object per line through pino. The level defaults to `info`. The demo tasks set `LOG_LEVEL=info` and `OTEL_LOG_LEVEL=error` so the lines that reach CloudWatch stay small.
+`createLogger({ service })` writes one JSON object per line through pino. The level is the `LOG_LEVEL` environment variable, read when the process creates the logger. The default is `info`. The demo tasks set `LOG_LEVEL=info` and `OTEL_LOG_LEVEL=error` so the lines that reach CloudWatch stay small. `LOG_LEVEL=debug` turns on `about to …` lines without rebuilding the image.
 
 Present on every line: `service`, `level`, `msg`, `time`.
 
 Present when a valid span is active: `trace_id`, `span_id`, and `xray_trace_id`. The X-Ray field is the encoding `1-{first 8 hex}-{last 24 hex}` of the W3C trace id. Export is still OTLP. `startTelemetry` installs the async context manager those fields are read from.
 
 Present when the log call or `withOrderId` set it: `orderId`. An explicit log field wins over the context value.
+
+Present when the request context has a customer: `customer_hash`, a 16-character SHA-256 prefix. The raw customer id, name, and phone are not log fields. Shop sends the hash to other services on `x-customer-hash`.
+
+Present when a fault matched or ran during the request: `fault.configured` and `fault.injected`.
+
+### Access log
+
+Each service writes one `request` line per call: `route` (the route template, such as `/orders/:orderId`, never the raw path), `method`, `status`, and `duration_ms`. Request and response bodies are not logged. `/health` is omitted.
+
+### Side effects
+
+`withSideEffectLog` wraps database writes, inventory reserve and release, payment charge and capture, delivery handoff, and each outbound HTTP call.
+
+- Before the call, at debug: `about to <action>` with `action`.
+- After a success, at info: `<action> succeeded` with `outcome=success` and `duration_ms`.
+- Expected business failures (out of stock, declined payment) log a warning and rethrow.
+- Timeouts, unexpected errors, and injected faults log an error, including `fault.injected` when a fault was thrown, and rethrow.
+
+`action` is a stable name: `payment-charge`, `payment-capture`, `inventory-reserve`, `inventory-release`, `delivery-handoff`, `checkout`, or `db-write`. A database line's `operation` is the logical name (`order.write`, `transaction`), never SQL text. At `LOG_LEVEL=info` the debug line is hidden, so a normal leaf request stays near three lines: the access line, the business action, and one `db-write`.
 
 Redaction happens in the logger:
 
