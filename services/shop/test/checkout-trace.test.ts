@@ -172,6 +172,11 @@ describe('connected checkout trace', () => {
       const ids = traceIdsFor(service, orderId);
       expect(ids.length, `${service} logs`).toBeGreaterThan(0);
       expect(new Set(ids), `${service} logs`).toEqual(new Set([traceId]));
+      const access = logs.filter(
+        (line) => line.service === service && line.msg === 'request' && line.orderId === orderId,
+      );
+      expect(access.length, `${service} access`).toBeGreaterThan(0);
+      expect(access.every((line) => line.trace_id === traceId)).toBe(true);
     }
     expect(outbound.map((event) => event.target)).toEqual(
       expect.arrayContaining(['inventory', 'payment', 'delivery', 'database']),
@@ -243,7 +248,9 @@ describe('connected checkout trace', () => {
     const downstreamLogs = traceIdsFor(hop, orderId);
     expect(downstreamLogs.length).toBeGreaterThan(0);
     expect(downstreamLogs.every((id) => id !== traceId)).toBe(true);
-    expect(traceIdsFor('shop', orderId)).toEqual([traceId]);
+    const shopIds = traceIdsFor('shop', orderId);
+    expect(shopIds.length).toBeGreaterThan(0);
+    expect(new Set(shopIds)).toEqual(new Set([traceId]));
   });
 
   async function checkoutCart(sku: string, qty: number, orderId: string) {

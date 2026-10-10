@@ -1,4 +1,16 @@
-export { currentOrderId, ORDER_ID_FIELD, withOrderId } from './context.js';
+export {
+  bindRequestLogContext,
+  currentCustomerHash,
+  currentFaultFlags,
+  currentOrderId,
+  customerHash,
+  CUSTOMER_HASH_HEADER,
+  CUSTOMER_HASH_PATTERN,
+  markFaultFlag,
+  ORDER_ID_FIELD,
+  withCustomerHash,
+  withOrderId,
+} from './context.js';
 export { resolveTelemetryConfig, type TelemetryConfig, type TelemetryOptions } from './config.js';
 export {
   FAULT_CONFIGURED_ATTRIBUTE,
@@ -36,7 +48,19 @@ export {
   type FaultSchedule,
   type FaultSwitchReader,
 } from './fault-control.js';
+export { logRequest } from './access.js';
+export { withLoggedWrites } from './logged-sql.js';
 export { createLogger, type LoggerOptions } from './logger.js';
+export {
+  classifyFailure,
+  ExpectedSideEffectFailure,
+  insideSideEffect,
+  withSideEffectLog,
+  type SideEffectDetail,
+  type SideEffectInput,
+  type SideEffectOptions,
+  type SideEffectVerdict,
+} from './side-effect.js';
 export {
   classifyHttpStatus,
   createHttpMetrics,

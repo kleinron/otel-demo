@@ -19,6 +19,7 @@ export {
   jsonBody,
   markRequestError,
   orderIdFrom,
+  registerAccessLog,
   registerSpanLifecycle,
   routeParam,
   spanOf,

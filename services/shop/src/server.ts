@@ -1,16 +1,22 @@
 import {
+  customerHash,
   FaultInjectedError,
   routeOperation,
+  withCustomerHash,
+  withLoggedWrites,
+  withSideEffectLog,
   type FaultController,
   type HttpMetrics,
   type OutboundMetrics,
 } from '@otel-demo/telemetry';
 import type { Sql } from '@otel-demo/db';
+import { OutboundHttpError, isOutboundTimeout } from '@otel-demo/httpkit';
 import {
   headerValue,
   inRequest,
   jsonBody,
   markRequestError,
+  registerAccessLog,
   registerSpanLifecycle,
   routeParam,
   spanOf,
@@ -46,7 +52,8 @@ export interface BuildAppOptions {
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false });
-  const repo = options.repo ?? (options.sql ? createShopRepo(options.sql) : undefined);
+  const sql = options.sql ? withLoggedWrites(options.sql, options.logger) : undefined;
+  const repo = options.repo ?? (sql ? createShopRepo(sql) : undefined);
   const timeoutMs = options.timeoutMs ?? 2_000;
   const downstream =
     options.downstream ??
@@ -57,13 +64,15 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
           deliveryUrl: options.deliveryUrl,
           timeoutMs,
           outbound: options.outbound,
+          logger: options.logger,
         })
       : undefined);
   const catalog =
     options.catalog ??
     (options.inventoryUrl
-      ? createHttpCatalog(options.inventoryUrl, timeoutMs, options.outbound)
+      ? createHttpCatalog(options.inventoryUrl, timeoutMs, options.outbound, options.logger)
       : undefined);
+  registerAccessLog(app, options.logger);
   registerSpanLifecycle(app, SERVICE_NAME);
   app.addHook('onResponse', async (request, reply) => {
     options.metrics?.record({
@@ -89,7 +98,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       if (!customer) {
         return reply.code(404).send({ error: 'unknown_customer' });
       }
-      const cart = await repo.createCart(customerId);
+      const cart = await withCustomerHash(customerHash(customerId), () =>
+        repo.createCart(customerId),
+      );
       return reply.code(201).send(cart);
     }),
   );
@@ -112,39 +123,69 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       if (!repo) {
         return reply.code(503).send({ error: 'database_unconfigured' });
       }
-      const fault = await injectFault(options, request, reply, 'add-to-cart');
-      if (fault) {
-        return fault;
-      }
       const body = jsonBody(request);
       const sku = stringField(body, 'sku');
       const qty = body.qty;
       if (!sku || typeof qty !== 'number' || !Number.isInteger(qty) || qty <= 0) {
         return reply.code(400).send({ error: 'invalid_item' });
       }
-      let unitPriceCents =
-        typeof body.unitPriceCents === 'number' ? body.unitPriceCents : undefined;
-      if (catalog) {
-        try {
-          const priced = await catalog.getSku(sku);
-          if (!priced) {
-            return reply.code(400).send({ error: 'unknown_sku', sku });
+      try {
+        const cart = await withSideEffectLog(
+          options.logger,
+          { action: 'add-to-cart' },
+          async () => {
+            await runFault(options, request, 'add-to-cart');
+            let unitPriceCents =
+              typeof body.unitPriceCents === 'number' ? body.unitPriceCents : undefined;
+            if (catalog) {
+              const priced = await catalog.getSku(sku);
+              if (!priced) {
+                throw new ExpectedItemError('unknown_sku', sku);
+              }
+              unitPriceCents = priced.priceCents;
+            }
+            if (
+              unitPriceCents === undefined ||
+              !Number.isInteger(unitPriceCents) ||
+              unitPriceCents < 0
+            ) {
+              throw new ExpectedItemError('invalid_price');
+            }
+            const added = await repo.addItem(routeParam(request, 'cartId'), {
+              sku,
+              qty,
+              unitPriceCents,
+            });
+            if (!added) {
+              throw new ExpectedItemError('cart_not_found');
+            }
+            return added;
+          },
+          {
+            expected: (error) => (error instanceof ExpectedItemError ? error.code : undefined),
+          },
+        );
+        return reply.code(200).send(cart);
+      } catch (error) {
+        const fault = faultReply(error, reply);
+        if (fault) {
+          return fault;
+        }
+        if (error instanceof ExpectedItemError) {
+          if (error.code === 'unknown_sku') {
+            return reply.code(400).send({ error: 'unknown_sku', sku: error.sku });
           }
-          unitPriceCents = priced.priceCents;
-        } catch {
+          if (error.code === 'invalid_price') {
+            return reply.code(400).send({ error: 'invalid_price' });
+          }
+          return reply.code(404).send({ error: 'cart_not_found' });
+        }
+        if (error instanceof OutboundHttpError || isOutboundTimeout(error)) {
           markRequestError(request, 'downstream');
           return reply.code(502).send({ error: 'downstream' });
         }
+        throw error;
       }
-      if (unitPriceCents === undefined || !Number.isInteger(unitPriceCents) || unitPriceCents < 0) {
-        return reply.code(400).send({ error: 'invalid_price' });
-      }
-      const cart = await repo.addItem(routeParam(request, 'cartId'), { sku, qty, unitPriceCents });
-      if (!cart) {
-        return reply.code(404).send({ error: 'cart_not_found' });
-      }
-      options.logger?.info({ sku, qty }, 'added cart item');
-      return reply.code(200).send(cart);
     }),
   );
 
@@ -153,16 +194,36 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       if (!repo) {
         return reply.code(503).send({ error: 'database_unconfigured' });
       }
-      const fault = await injectFault(options, request, reply, 'remove-from-cart');
-      if (fault) {
-        return fault;
+      try {
+        const cart = await withSideEffectLog(
+          options.logger,
+          { action: 'remove-from-cart' },
+          async () => {
+            await runFault(options, request, 'remove-from-cart');
+            const removed = await repo.removeItem(
+              routeParam(request, 'cartId'),
+              routeParam(request, 'sku'),
+            );
+            if (!removed) {
+              throw new ExpectedItemError('cart_not_found');
+            }
+            return removed;
+          },
+          {
+            expected: (error) => (error instanceof ExpectedItemError ? error.code : undefined),
+          },
+        );
+        return reply.code(200).send(cart);
+      } catch (error) {
+        const fault = faultReply(error, reply);
+        if (fault) {
+          return fault;
+        }
+        if (error instanceof ExpectedItemError) {
+          return reply.code(404).send({ error: 'cart_not_found' });
+        }
+        throw error;
       }
-      const cart = await repo.removeItem(routeParam(request, 'cartId'), routeParam(request, 'sku'));
-      if (!cart) {
-        return reply.code(404).send({ error: 'cart_not_found' });
-      }
-      options.logger?.info({ sku: routeParam(request, 'sku') }, 'removed cart item');
-      return reply.code(200).send(cart);
     }),
   );
 
@@ -171,30 +232,30 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       if (!repo || !downstream) {
         return reply.code(503).send({ error: 'checkout_unconfigured' });
       }
-      const fault = await injectFault(options, request, reply, 'checkout');
-      if (fault) {
-        return fault;
-      }
       const idempotencyKey = headerValue(request, 'idempotency-key');
       if (!idempotencyKey) {
         return reply.code(400).send({ error: 'missing_idempotency_key' });
       }
-      const result = await runCheckout(
-        repo,
-        downstream,
-        routeParam(request, 'cartId'),
-        idempotencyKey,
-        (message) => markRequestError(request, message),
-      );
-      if (result.statusCode === 200) {
-        options.logger?.info({ orderId: idempotencyKey }, 'checkout completed');
-      } else {
-        options.logger?.error(
-          { orderId: idempotencyKey, error: result.body.error },
-          'checkout failed',
+      try {
+        const result = await runCheckout(
+          repo,
+          downstream,
+          routeParam(request, 'cartId'),
+          idempotencyKey,
+          (message) => markRequestError(request, message),
+          {
+            logger: options.logger,
+            before: () => runFault(options, request, 'checkout'),
+          },
         );
+        return reply.code(result.statusCode).send(result.body);
+      } catch (error) {
+        const fault = faultReply(error, reply);
+        if (fault) {
+          return fault;
+        }
+        throw error;
       }
-      return reply.code(result.statusCode).send(result.body);
     }),
   );
 
@@ -203,46 +264,73 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       if (!repo) {
         return reply.code(503).send({ error: 'database_unconfigured' });
       }
-      const fault = await injectFault(options, request, reply, 'order-status');
-      if (fault) {
-        return fault;
+      const orderId = routeParam(request, 'orderId');
+      try {
+        const order = await withSideEffectLog(
+          options.logger,
+          { action: 'order-status', orderId },
+          async () => {
+            await runFault(options, request, 'order-status');
+            const found = await repo.findOrder(orderId);
+            if (!found) {
+              throw new ExpectedItemError('not_found');
+            }
+            return found;
+          },
+          {
+            expected: (error) => (error instanceof ExpectedItemError ? 'not_found' : undefined),
+          },
+        );
+        return reply.code(200).send(order);
+      } catch (error) {
+        const fault = faultReply(error, reply);
+        if (fault) {
+          return fault;
+        }
+        if (error instanceof ExpectedItemError) {
+          return reply.code(404).send({ error: 'not_found' });
+        }
+        throw error;
       }
-      const order = await repo.findOrder(routeParam(request, 'orderId'));
-      if (!order) {
-        return reply.code(404).send({ error: 'not_found' });
-      }
-      options.logger?.info({ orderId: order.orderId, status: order.status }, 'order status');
-      return reply.code(200).send(order);
     }),
   );
 
   return app;
 }
 
-async function injectFault(
+async function runFault(
   options: BuildAppOptions,
   request: FastifyRequest,
-  reply: FastifyReply,
   operation: string,
-): Promise<FastifyReply | undefined> {
+): Promise<void> {
   const span = spanOf(request);
   if (!span || !options.faults) {
+    return;
+  }
+  await options.faults.apply({ service: SERVICE_NAME, operation }, span);
+}
+
+function faultReply(error: unknown, reply: FastifyReply): FastifyReply | undefined {
+  if (!(error instanceof FaultInjectedError)) {
     return undefined;
   }
-  try {
-    await options.faults.apply({ service: SERVICE_NAME, operation }, span);
-    return undefined;
-  } catch (error) {
-    if (!(error instanceof FaultInjectedError)) {
-      throw error;
-    }
-    options.logger?.error({ faultId: error.faultId, faultType: error.faultType }, 'fault injected');
-    const status = error.faultType === 'timeout' ? 504 : 500;
-    return reply.code(status).send({
-      error: 'fault',
-      faultId: error.faultId,
-      faultType: error.faultType,
-    });
+  const status = error.faultType === 'timeout' ? 504 : 500;
+  return reply.code(status).send({
+    error: 'fault',
+    faultId: error.faultId,
+    faultType: error.faultType,
+  });
+}
+
+class ExpectedItemError extends Error {
+  readonly code: string;
+  readonly sku?: string;
+
+  constructor(code: string, sku?: string) {
+    super(code);
+    this.name = 'ExpectedItemError';
+    this.code = code;
+    this.sku = sku;
   }
 }
 

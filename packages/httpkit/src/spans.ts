@@ -6,8 +6,15 @@ import {
   type Context,
   type Span,
 } from '@opentelemetry/api';
-import { extractTraceContext, routeOperation, withOrderId } from '@otel-demo/telemetry';
+import {
+  bindRequestLogContext,
+  CUSTOMER_HASH_HEADER,
+  extractTraceContext,
+  logRequest,
+  routeOperation,
+} from '@otel-demo/telemetry';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { Logger } from 'pino';
 
 const spans = new WeakMap<FastifyRequest, Span>();
 const contexts = new WeakMap<FastifyRequest, Context>();
@@ -66,19 +73,49 @@ export function markRequestError(request: FastifyRequest, message: string): void
   span.setAttribute('error.type', message);
 }
 
+/**
+ * Access line for every matched request except `/health`. Registered before
+ * the span-ending hook so the line still sees `trace_id` and `span_id`.
+ */
+export function registerAccessLog(app: FastifyInstance, logger?: Logger): void {
+  if (!logger) {
+    return;
+  }
+  app.addHook('onResponse', async (request, reply) => {
+    const route = routeOperation(request.routeOptions.url);
+    const path = request.url.split('?')[0] ?? '';
+    if (route === '/health' || path === '/health') {
+      return;
+    }
+    const ctx = contexts.get(request);
+    const write = () => {
+      logRequest(logger, {
+        route,
+        method: request.method,
+        status: reply.statusCode,
+        durationMs: reply.elapsedTime,
+      });
+    };
+    if (ctx) {
+      context.with(ctx, write);
+      return;
+    }
+    write();
+  });
+}
+
 /** Run the handler inside the request span so logs and outbound calls stay on the same trace. */
 export async function inRequest<T>(request: FastifyRequest, fn: () => Promise<T>): Promise<T> {
-  const ctx = contexts.get(request) ?? context.active();
   const orderId = orderIdFrom(request);
+  const hash = headerValue(request, CUSTOMER_HASH_HEADER);
+  const ctx = bindRequestLogContext(contexts.get(request) ?? context.active(), orderId, hash);
+  contexts.set(request, ctx);
   return context.with(ctx, async () => {
     const span = spans.get(request);
     if (orderId && span) {
       span.setAttribute('orderId', orderId);
     }
-    if (!orderId) {
-      return fn();
-    }
-    return withOrderId(orderId, fn);
+    return fn();
   });
 }
 

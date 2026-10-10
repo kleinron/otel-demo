@@ -1,4 +1,11 @@
 import { isOutboundTimeout } from '@otel-demo/httpkit';
+import {
+  customerHash,
+  withCustomerHash,
+  withSideEffectLog,
+  type SideEffectVerdict,
+} from '@otel-demo/telemetry';
+import type { Logger } from 'pino';
 import type { Downstream } from './downstream.js';
 import type { Cart, Order, ShopRepo } from './repo.js';
 
@@ -7,12 +14,19 @@ export interface CheckoutResult {
   body: Record<string, unknown>;
 }
 
+export interface CheckoutHooks {
+  logger?: Logger;
+  /** Runs inside the checkout side-effect log, so a fault is an error line. */
+  before?: () => Promise<void>;
+}
+
 export async function runCheckout(
   repo: ShopRepo,
   downstream: Downstream,
   cartId: string,
   idempotencyKey: string,
   markError: (message: string) => void,
+  hooks: CheckoutHooks = {},
 ): Promise<CheckoutResult> {
   const cart = await repo.getCart(cartId);
   if (!cart) {
@@ -26,6 +40,28 @@ export async function runCheckout(
     return { statusCode: 400, body: { error: 'unknown_customer', customerId: cart.customerId } };
   }
 
+  return withCustomerHash(customerHash(customer.id), () =>
+    withSideEffectLog(
+      hooks.logger,
+      { action: 'checkout', orderId: idempotencyKey },
+      async () => {
+        await hooks.before?.();
+        return finishCheckout(repo, downstream, cart, customer, idempotencyKey, markError);
+      },
+      { verdict: checkoutVerdict },
+    ),
+  );
+}
+
+async function finishCheckout(
+  repo: ShopRepo,
+  downstream: Downstream,
+  cart: Cart,
+  customer: { id: string; city: string },
+  idempotencyKey: string,
+  markError: (message: string) => void,
+): Promise<CheckoutResult> {
+  const cartId = cart.cartId;
   const existingForCart = await repo.findOrderByCart(cartId);
   if (existingForCart && existingForCart.orderId !== idempotencyKey) {
     return {
@@ -124,6 +160,25 @@ export async function runCheckout(
   }
 
   return { statusCode: 200, body: orderBody(order) };
+}
+
+function checkoutVerdict(result: CheckoutResult): SideEffectVerdict {
+  if (result.statusCode === 409) {
+    return { level: 'warn', outcome: 'out_of_stock' };
+  }
+  if (result.statusCode === 402) {
+    return { level: 'warn', outcome: 'declined' };
+  }
+  if (result.statusCode === 504) {
+    return { level: 'error', outcome: 'timeout' };
+  }
+  if (result.statusCode >= 500) {
+    return { level: 'error', outcome: 'error' };
+  }
+  if (result.statusCode >= 400) {
+    return { level: 'warn', outcome: 'rejected' };
+  }
+  return 'success';
 }
 
 function failDownstream(

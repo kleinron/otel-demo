@@ -1,6 +1,8 @@
 import {
   FaultInjectedError,
   routeOperation,
+  withLoggedWrites,
+  withSideEffectLog,
   type FaultController,
   type HttpMetrics,
   type OutboundMetrics,
@@ -11,6 +13,7 @@ import {
   inRequest,
   jsonBody,
   markRequestError,
+  registerAccessLog,
   registerSpanLifecycle,
   routeParam,
   spanOf,
@@ -38,7 +41,9 @@ export interface BuildAppOptions {
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false });
-  const repo = options.repo ?? (options.sql ? createInventoryRepo(options.sql) : undefined);
+  const sql = options.sql ? withLoggedWrites(options.sql, options.logger) : undefined;
+  const repo = options.repo ?? (sql ? createInventoryRepo(sql) : undefined);
+  registerAccessLog(app, options.logger);
   registerSpanLifecycle(app, SERVICE_NAME);
   app.addHook('onResponse', async (request, reply) => {
     options.metrics?.record({
@@ -56,10 +61,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       if (!repo) {
         return reply.code(503).send({ error: 'database_unconfigured' });
       }
-      const fault = await injectFault(options, request, reply, 'reserve');
-      if (fault) {
-        return fault;
-      }
       const body = jsonBody(request);
       const orderId = typeof body.orderId === 'string' ? body.orderId.trim() : '';
       const idempotencyKey = headerValue(request, 'idempotency-key');
@@ -71,15 +72,35 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         return reply.code(400).send({ error: 'invalid_items' });
       }
       try {
-        const allocations = await repo.reserve(orderId, items);
-        options.logger?.info({ orderId, allocations: allocations.length }, 'reserved stock');
+        const allocations = await withSideEffectLog(
+          options.logger,
+          { action: 'inventory-reserve', orderId },
+          async () => {
+            await runFault(options, request, 'reserve');
+            return repo.reserve(orderId, items);
+          },
+          {
+            expected: (error) => {
+              if (error instanceof OutOfStockError) {
+                return 'out_of_stock';
+              }
+              if (error instanceof UnknownSkuError) {
+                return 'unknown_sku';
+              }
+              return undefined;
+            },
+          },
+        );
         return reply.code(200).send({ orderId, status: 'reserved', allocations });
       } catch (error) {
+        const fault = faultReply(error, reply);
+        if (fault) {
+          return fault;
+        }
         if (error instanceof OutOfStockError) {
           markRequestError(request, 'out_of_stock');
           const span = spanOf(request);
           span?.setAttribute('business.outcome', 'out_of_stock');
-          options.logger?.info({ orderId, sku: error.sku }, 'out of stock');
           return reply.code(409).send({ error: 'out_of_stock', sku: error.sku, orderId });
         }
         if (error instanceof UnknownSkuError) {
@@ -95,17 +116,31 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       if (!repo) {
         return reply.code(503).send({ error: 'database_unconfigured' });
       }
-      const fault = await injectFault(options, request, reply, 'release');
-      if (fault) {
-        return fault;
-      }
       const orderId = routeParam(request, 'orderId');
-      const result = await repo.release(orderId);
-      if (result === 'missing') {
-        return reply.code(404).send({ error: 'not_found', orderId });
+      try {
+        const result = await withSideEffectLog(
+          options.logger,
+          { action: 'inventory-release', orderId },
+          async () => {
+            await runFault(options, request, 'release');
+            return repo.release(orderId);
+          },
+          {
+            verdict: (value) =>
+              value === 'missing' ? { level: 'warn', outcome: 'not_found' } : 'success',
+          },
+        );
+        if (result === 'missing') {
+          return reply.code(404).send({ error: 'not_found', orderId });
+        }
+        return reply.code(200).send({ orderId, status: 'released' });
+      } catch (error) {
+        const fault = faultReply(error, reply);
+        if (fault) {
+          return fault;
+        }
+        throw error;
       }
-      options.logger?.info({ orderId }, 'released stock');
-      return reply.code(200).send({ orderId, status: 'released' });
     }),
   );
 
@@ -125,31 +160,28 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   return app;
 }
 
-async function injectFault(
+async function runFault(
   options: BuildAppOptions,
   request: FastifyRequest,
-  reply: FastifyReply,
   operation: string,
-): Promise<FastifyReply | undefined> {
+): Promise<void> {
   const span = spanOf(request);
   if (!span || !options.faults) {
+    return;
+  }
+  await options.faults.apply({ service: SERVICE_NAME, operation }, span);
+}
+
+function faultReply(error: unknown, reply: FastifyReply): FastifyReply | undefined {
+  if (!(error instanceof FaultInjectedError)) {
     return undefined;
   }
-  try {
-    await options.faults.apply({ service: SERVICE_NAME, operation }, span);
-    return undefined;
-  } catch (error) {
-    if (!(error instanceof FaultInjectedError)) {
-      throw error;
-    }
-    options.logger?.error({ faultId: error.faultId, faultType: error.faultType }, 'fault injected');
-    const status = error.faultType === 'timeout' ? 504 : 500;
-    return reply.code(status).send({
-      error: 'fault',
-      faultId: error.faultId,
-      faultType: error.faultType,
-    });
-  }
+  const status = error.faultType === 'timeout' ? 504 : 500;
+  return reply.code(status).send({
+    error: 'fault',
+    faultId: error.faultId,
+    faultType: error.faultType,
+  });
 }
 
 function readItems(value: unknown): { sku: string; qty: number }[] | undefined {
