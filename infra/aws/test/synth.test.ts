@@ -78,14 +78,18 @@ describe('cdk synth', () => {
       expect(repository.Properties?.EmptyOnDelete).toBe(true);
       expect(repository.DeletionPolicy).toBe('Delete');
     }
-    expect(ofType(template, 'AWS::Logs::LogGroup').length).toBeGreaterThanOrEqual(8);
+    const logGroups = ofType(template, 'AWS::Logs::LogGroup');
+    expect(logGroups.length).toBeGreaterThanOrEqual(8);
+    expect(logGroups.map((group) => group.Properties?.LogGroupName)).toContain(
+      '/otel-demo/metrics',
+    );
     for (const group of ofType(template, 'AWS::Logs::LogGroup')) {
       expect(group.Properties?.RetentionInDays).toBe(7);
       expect(group.DeletionPolicy).toBe('Delete');
     }
   });
 
-  it('runs six small public ARM tasks and keeps shop traffic on an internal load balancer', () => {
+  it('defines six small public ARM tasks, leaves the load generator stopped, and keeps shop traffic internal', () => {
     const tasks = ofType(template, 'AWS::ECS::TaskDefinition');
     expect(tasks).toHaveLength(6);
     for (const task of tasks) {
@@ -98,7 +102,8 @@ describe('cdk synth', () => {
     const services = ofType(template, 'AWS::ECS::Service');
     expect(services).toHaveLength(6);
     for (const service of services) {
-      expect(service.Properties?.DesiredCount).toBe(1);
+      const serviceName = service.Properties?.ServiceName;
+      expect(service.Properties?.DesiredCount).toBe(serviceName === 'otel-demo-loadgen' ? 0 : 1);
       const network = service.Properties?.NetworkConfiguration as {
         AwsvpcConfiguration?: { AssignPublicIp?: string };
       };
@@ -201,11 +206,24 @@ describe('cdk synth', () => {
       );
     }
     const text = JSON.stringify(template);
-    expect(text).toContain('tail_sampling');
-    expect(text).toContain('sampling_percentage');
+    expect(text).not.toContain('tail_sampling');
+    expect(text).not.toContain('sampling_percentage');
+    expect(text).toContain('exporters: [awsxray]');
     expect(text).toContain('otel-demo-all-lines-for-a-trace-id');
     expect(text).toContain('otel-demo-errors-by-service-last-15m');
-    expect(text).toContain('"Name":"LOG_LEVEL","Value":"info"');
     expect(text).toContain('"Name":"OTEL_LOG_LEVEL","Value":"error"');
+    const apps = ofType(template, 'AWS::ECS::TaskDefinition').flatMap((task) => {
+      const containers = task.Properties?.ContainerDefinitions as {
+        Name?: string;
+        Environment?: { Name?: string; Value?: string }[];
+      }[];
+      return containers.filter((container) => container.Name === 'app');
+    });
+    expect(apps).toHaveLength(5);
+    for (const app of apps) {
+      expect(app.Environment).toEqual(
+        expect.arrayContaining([{ Name: 'LOG_LEVEL', Value: 'info' }]),
+      );
+    }
   });
 });

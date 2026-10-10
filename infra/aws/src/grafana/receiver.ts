@@ -47,6 +47,8 @@ export function formatAlertLines(body: unknown, nowIso: string): string[] {
 /** Small HTTP receiver. Listens on localhost inside the Grafana task network namespace. */
 export function receiverScript(): string {
   return `'use strict';
+// tsx and esbuild wrap named functions with __name. Define it so the shipped source runs.
+const __name = (target) => target;
 const http = require('http');
 const formatAlertLines = ${formatAlertLines.toString()};
 const server = http.createServer((req, res) => {

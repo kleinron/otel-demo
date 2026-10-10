@@ -9,7 +9,8 @@ COPY packages ./packages
 COPY services ./services
 COPY loadgen ./loadgen
 COPY infra/aws/docker/fault-switch.cjs /opt/fault-switch/fault-switch.cjs
-RUN npm ci && npm run build \
+# infra/aws is not copied into the image, so build only the runtime workspaces.
+RUN npm ci && npx tsc -b services/shop services/inventory services/payment services/delivery loadgen \
   && npm install --prefix /opt/fault-switch @aws-sdk/client-ssm@3.901.0
 ENV LOG_LEVEL=info
 WORKDIR /app

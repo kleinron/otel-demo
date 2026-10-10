@@ -47,3 +47,5 @@ SHOP_URL=http://localhost:3001 npm run start -w @otel-demo/loadgen
 `docker compose --profile load up --build` starts the generator next to the shop. Faults stay off until `OTEL_DEMO_FAULTS_ENABLED=true`. The services read the same `schedule.json` and apply whatever window is open, polling the kill switch the same way as a single-window schedule.
 
 Each start logs `runner started` with `at` (UTC) and `seed`. Every request is one JSON line: `flowId`, `timestamp` (UTC), `operation`, `status`, `latencyMs`. Spike, warm-up, and fault markers use `spike start`, `spike end`, `warmup start`, `warmup end`, `fault window start`, and `fault window end`, with `at` set to the scheduled UTC boundary. A process that wakes up inside a window does not emit that window's start again.
+
+On AWS the ECS service `otel-demo-loadgen` is deployed with desired count 0. `npm run loadgen:start` sets that count to 1 and `npm run loadgen:stop` sets it back to 0. Seed shop and inventory with `npm run seed:aws` before the first start. See the run section in the [root README](../README.md).

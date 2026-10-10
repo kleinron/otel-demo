@@ -6,7 +6,7 @@ The CDK app follows the no-NAT ARM column below. These tables are the SRE estima
 
 ## Revised expectation
 
-Revised expectation: with the agreed load profile (~2.5 req/s avg) logs are expected at 1-2 GB, below the Low scenario (5 GB); the Low column is the closest match. 5/20/50 GB were bracketing assumptions, not measurements. Traces are expected to be ~100% of checkout/payment/delivery traces (~9k over the run) plus sampled browse/cart traffic, so X-Ray cost is well under the 1M-trace Expected line.
+Revised expectation: with the agreed load profile (~2.5 req/s avg) logs are expected at 1-2 GB, below the Low scenario (5 GB); the Low column is the closest match. 5/20/50 GB were bracketing assumptions, not measurements. Traces are a must-have and are recorded at 100%. The collector does not tail-sample: each of the four services has its own sidecar, and a decision in one collector cannot keep a checkout trace whole across shop, inventory, payment, and delivery. X-Ray at about 1 million traces is a few dollars ($5.00 stored and $0.50 scanned on the 1M lines below).
 
 <!-- prettier-ignore-start -->
 # 72-hour experiment cost estimate, eu-central-1 (Frankfurt)
@@ -178,7 +178,7 @@ Top 3 in High + NAT: CW Logs ingestion $31.50; X-Ray traces stored $25.00; CW cu
 - Metrics: 500 custom metric series for the whole 72 h at $0.30 (first 10k tier), prorated hourly. PutMetricData requests: ASSUMED 1 call per task per 10 s (129,600 calls) at $0.01/1000.
 - CloudWatch standard alarms are not generated. The previous 16-alarm line is quantity 0 ($0). Grafana evaluates the catalog. About 30 rules every minute for 72 h is 30 x 60 x 72 = 129,600 GetMetricData metric requests at $0.01 per 1,000 metrics ($0.00001 per metric) = $1.2960. The rule count is an assumption; the unit price is from the CloudWatch bulk JSON (operation GetMetricData, usagetype EUC1-CW:GMD-Metrics).
 - One Secrets Manager secret at $0.40 per secret (price-list unit Secrets, description "$0.40 per Secret"). 72 h uses this file's 0.0986 month factor: 0.0986 x $0.40 = $0.0394. The bulk JSON description does not contain the word "month"; the same 730 h month used for the other monthly rates is applied here. Secrets Manager API requests are $0.05 per 10,000 ($0.000005 each) and have no call volume in this estimate, so they are not added.
-- X-Ray: "recorded" = stored ($5/M), "scanned" = scanned/retrieved ($0.50/M) once per trace.
+- X-Ray: "recorded" = stored ($5/M), "scanned" = scanned/retrieved ($0.50/M) once per trace. The ADOT config exports every span. There is no tail-sampling processor, because per-sidecar tail sampling would split a checkout across the four collectors. About 1 million traces is a few dollars ($5.50 recorded plus scanned). The 1M column stays the planning figure.
 - ECR 2 GB, S3 1 GB (requests ignored), data transfer out 10 GB at the first-tier $0.09/GB.
 - AWS Budgets: 2 budgets, within free (first 2 action-enabled budget-days free, then $0.10/budget-day; plain budgets $0).
 - Free tiers (CW 5 GB log ingestion/10 metrics/10 alarms, X-Ray 100k traces/1M scans, data-transfer 100 GB/month) NOT deducted: account-dependent, so totals are conservative. The 10-alarm free tier does not apply here because no CloudWatch alarms are generated. Taxes, Support plan, KMS, further secrets beyond the one priced above, Secrets Manager API calls, and Route 53 are not included. The stack creates no ACM certificate.

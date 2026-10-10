@@ -56,6 +56,23 @@ npm run synth -w @otel-demo/infra-aws
 
 An operator deploy, from `infra/aws`, is `npx cdk deploy --region eu-central-1`. Build each service image and push the `demo` tag to its ECR repository before that. Synth does not build images.
 
+After the first deploy, seed reference data before any checkout traffic. Payment and delivery create their tables when those tasks start. Shop customers and inventory stock are loaded by one-off Fargate tasks that use the deployed task definitions, replace the app command with the seed program, and then stop:
+
+```bash
+npm run seed:aws
+```
+
+That is a required step after the first deploy. The seed program drops the shop and inventory tables and loads the reference data again. Run it again only when that data should be rebuilt. The `demo` image has to include `services/shop/dist/seed-main.js` and `services/inventory/dist/seed-main.js`, so push that image before seeding. The task entrypoint still runs the fault switch, which builds `DATABASE_URL` from the task's database settings, then starts the seed program. Region defaults to `eu-central-1` (`AWS_REGION` or `EXPERIMENT_REGION` override it). The command names the cluster `otel-demo` and the services `otel-demo-shop` and `otel-demo-inventory`.
+
+The load generator service is deployed with desired count 0, so `cdk deploy` leaves it stopped. Start it for a run and stop it when the run is over:
+
+```bash
+npm run loadgen:start
+npm run loadgen:stop
+```
+
+Those set the `otel-demo-loadgen` desired count to 1 and 0.
+
 Grafana is plain HTTP on port 3000. The task is in a public subnet and has a public address. Its security group is created with no inbound rules. After every deploy, including a redeploy, add your address on port 3000 to the group in the `GrafanaSecurityGroupId` output. The group does not keep that rule across a redeploy. The task address changes when the task restarts. With credentials in the environment:
 
 ```bash
