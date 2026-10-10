@@ -23,7 +23,10 @@ export interface FaultTarget {
   operation: string;
 }
 
+/** Set only when a fault was actually performed (delay, error, or drop). */
 export const FAULT_INJECTED_ATTRIBUTE = 'fault.injected';
+/** Set when a configured fault matched the call but was not performed. */
+export const FAULT_CONFIGURED_ATTRIBUTE = 'fault.configured';
 export const FAULT_ID_ATTRIBUTE = 'fault.id';
 export const FAULT_TYPE_ATTRIBUTE = 'fault.type';
 
@@ -54,8 +57,10 @@ export function loadFaultInjectionConfig(
 }
 
 /**
- * Select every configured fault that matches the target and record each one
- * on the span. This does not delay, fail, or drop the call.
+ * Select every configured fault that matches the target and record the match
+ * on the span. Sets `fault.configured`. Does not set `fault.injected`: that
+ * attribute is reserved for a fault that was actually applied. This function
+ * does not delay, fail, or drop the call.
  */
 export function noteConfiguredFault(
   config: FaultInjectionConfig,
@@ -69,7 +74,7 @@ export function noteConfiguredFault(
   if (matched.length === 0) {
     return [];
   }
-  span.setAttribute(FAULT_INJECTED_ATTRIBUTE, true);
+  span.setAttribute(FAULT_CONFIGURED_ATTRIBUTE, true);
   span.setAttribute(
     FAULT_ID_ATTRIBUTE,
     matched.map((fault) => fault.id),

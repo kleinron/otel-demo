@@ -1,10 +1,34 @@
 import { type Meter } from '@opentelemetry/api';
 import { AggregationType, InstrumentType, type ViewOptions } from '@opentelemetry/sdk-metrics';
 
-/** Inclusive upper bounds, in milliseconds, for p50/p95/p99 on HTTP latency. */
+/**
+ * Inclusive upper bounds, in milliseconds, for p50/p95/p99 on HTTP latency.
+ * The 10s, 30s, and 60s buckets keep injected database timeouts (often past 5s)
+ * out of the overflow bucket. The percentile helper reports the last finite
+ * boundary for overflow, so the top boundary has to sit above those timeouts.
+ */
 export const HTTP_LATENCY_BUCKET_BOUNDARIES_MS = [
-  5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000,
+  5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000,
 ] as const;
+
+/** Operation label used when a request did not match a route template. */
+export const UNMATCHED_ROUTE_OPERATION = 'unmatched';
+
+/**
+ * `operation` label for an HTTP metric. Pass the matched route template
+ * (`/cart/items/:id`), never the raw request URL. Query strings are stripped.
+ * A missing template becomes `unmatched` so a 404 path cannot open a new series.
+ */
+export function routeOperation(routeTemplate: string | undefined): string {
+  if (routeTemplate === undefined) {
+    return UNMATCHED_ROUTE_OPERATION;
+  }
+  const path = routeTemplate.split('?')[0]?.trim() ?? '';
+  if (path === '' || path.includes('://')) {
+    return UNMATCHED_ROUTE_OPERATION;
+  }
+  return path;
+}
 
 export const HTTP_SERVER_DURATION_METRIC = 'http.server.request.duration';
 export const HTTP_SERVER_REQUESTS_METRIC = 'http.server.requests';
@@ -104,7 +128,7 @@ export function createHttpMetrics(meter: Meter, options: HttpMetricsOptions = {}
       const classification = classifyHttpStatus(observation.statusCode, businessOutcomes);
       const latencyAttributes = {
         service: observation.service ?? options.service ?? 'unknown',
-        operation: observation.operation,
+        operation: routeOperation(observation.operation),
         'http.request.method': observation.method,
       };
       duration.record(Math.max(0, observation.durationMs), latencyAttributes);

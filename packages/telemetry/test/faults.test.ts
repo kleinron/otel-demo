@@ -2,6 +2,7 @@ import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-tr
 import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
 import { describe, expect, it } from 'vitest';
 import {
+  FAULT_CONFIGURED_ATTRIBUTE,
   FAULT_ID_ATTRIBUTE,
   FAULT_INJECTED_ATTRIBUTE,
   FAULT_TYPE_ATTRIBUTE,
@@ -54,7 +55,7 @@ describe('fault injection skeleton', () => {
     ).toThrow(/JSON array/);
   });
 
-  it('records every matching fault on the span and does not fail the span', () => {
+  it('records a match as configured and leaves fault.injected unset', () => {
     const exporter = new InMemorySpanExporter();
     const provider = new BasicTracerProvider({
       spanProcessors: [new SimpleSpanProcessor(exporter)],
@@ -74,7 +75,8 @@ describe('fault injection skeleton', () => {
 
     expect(matched.map((fault) => fault.id)).toEqual(['inventory-delay', 'inventory-error']);
     const finished = exporter.getFinishedSpans()[0];
-    expect(finished?.attributes[FAULT_INJECTED_ATTRIBUTE]).toBe(true);
+    expect(finished?.attributes[FAULT_CONFIGURED_ATTRIBUTE]).toBe(true);
+    expect(finished?.attributes[FAULT_INJECTED_ATTRIBUTE]).toBeUndefined();
     expect(finished?.attributes[FAULT_ID_ATTRIBUTE]).toEqual([
       'inventory-delay',
       'inventory-error',
@@ -105,7 +107,9 @@ describe('fault injection skeleton', () => {
     unmatched.end();
 
     const spans = exporter.getFinishedSpans();
+    expect(spans[0]?.attributes[FAULT_CONFIGURED_ATTRIBUTE]).toBeUndefined();
     expect(spans[0]?.attributes[FAULT_INJECTED_ATTRIBUTE]).toBeUndefined();
+    expect(spans[1]?.attributes[FAULT_CONFIGURED_ATTRIBUTE]).toBeUndefined();
     expect(spans[1]?.attributes[FAULT_INJECTED_ATTRIBUTE]).toBeUndefined();
   });
 });

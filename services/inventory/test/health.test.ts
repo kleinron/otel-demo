@@ -19,7 +19,7 @@ describe('inventory', () => {
     expect(response.json()).toEqual({ status: 'ok', service: SERVICE_NAME });
     expect(seen).toEqual([
       expect.objectContaining({
-        operation: 'GET /health',
+        operation: '/health',
         method: 'GET',
         statusCode: 200,
         service: 'inventory',

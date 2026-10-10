@@ -1,6 +1,7 @@
 export { currentOrderId, ORDER_ID_FIELD, withOrderId } from './context.js';
 export { resolveTelemetryConfig, type TelemetryConfig, type TelemetryOptions } from './config.js';
 export {
+  FAULT_CONFIGURED_ATTRIBUTE,
   FAULT_ID_ATTRIBUTE,
   FAULT_INJECTED_ATTRIBUTE,
   FAULT_TYPE_ATTRIBUTE,
@@ -24,6 +25,8 @@ export {
   HTTP_SERVER_ERRORS_METRIC,
   HTTP_SERVER_REQUESTS_METRIC,
   httpServerDurationView,
+  routeOperation,
+  UNMATCHED_ROUTE_OPERATION,
   type HistogramBuckets,
   type HttpClassification,
   type HttpMetrics,

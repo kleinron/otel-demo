@@ -51,14 +51,16 @@ Redaction happens in the logger:
 
 `createHttpMetrics` records:
 
-| Instrument                      | Meaning                                                                                                                                                                                                                                     |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `http.server.request.duration`  | Latency histogram in milliseconds, keyed by `service`, `operation`, and method. Bucket boundaries are chosen so a backend can compute p50, p95, and p99. Status code is not a histogram dimension, so one operation has one latency series. |
-| `http.server.requests`          | Every response.                                                                                                                                                                                                                             |
-| `http.server.errors`            | HTTP 5xx only.                                                                                                                                                                                                                              |
-| `http.server.business_outcomes` | Business results. HTTP 409 is `business_outcome=out_of_stock` and does not increment the error counter.                                                                                                                                     |
+| Instrument                      | Meaning                                                                                                                                                                                                                                                                                                        |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `http.server.request.duration`  | Latency histogram in milliseconds, keyed by `service`, `operation`, and method. Buckets run through 5s, 10s, 30s, and 60s so a database timeout past 5 seconds stays in a finite bucket and a p99 above 5 seconds can fire. Status code is not a histogram dimension, so one operation has one latency series. |
+| `http.server.requests`          | Every response.                                                                                                                                                                                                                                                                                                |
+| `http.server.errors`            | HTTP 5xx only.                                                                                                                                                                                                                                                                                                 |
+| `http.server.business_outcomes` | Business results. HTTP 409 is `business_outcome=out_of_stock` and does not increment the error counter.                                                                                                                                                                                                        |
 
-`estimateHistogramPercentile` reads an explicit-bucket histogram and returns the inclusive upper bound of the bucket that crosses the percentile.
+`operation` is the matched route template, for example `/cart/items/:id`. It is not the raw request URL: path parameters and query strings must not open new series. A request that matches no route is `unmatched`. `routeOperation` is the helper the services use.
+
+`estimateHistogramPercentile` reads an explicit-bucket histogram and returns the inclusive upper bound of the bucket that crosses the percentile. A sample past the last boundary (60s) is reported as that boundary.
 
 ## Fault injection
 
@@ -69,13 +71,14 @@ Off by default. Nothing is delayed, failed, or dropped in this phase.
 | `OTEL_DEMO_FAULTS_ENABLED` | Must be `true`, `1`, or `on`. Anything else, including unset, leaves injection off and ignores the fault list.                                                       |
 | `OTEL_DEMO_FAULTS`         | JSON array, read only when injection is enabled. Each object has `id`, `type` (`delay`, `error`, or `drop`), and optional `service`, `operation`, and `probability`. |
 
-`noteConfiguredFault` records every matching fault on the current span:
+`noteConfiguredFault` records every matching fault on the current span as configured, not applied:
 
-- `fault.injected` = `true`
+- `fault.configured` = `true` when a fault rule matched and was not performed
 - `fault.id` = every matching id
 - `fault.type` = every matching type
+- `fault.injected` stays unset
 
-`probability` is stored and not rolled. A configured match is recorded even though the fault is not performed.
+`fault.injected` is reserved for a fault that was actually applied (the delay, error, or drop ran). This phase never applies a fault, so it never sets `fault.injected`. `probability` is stored and not rolled.
 
 ## Service ports
 

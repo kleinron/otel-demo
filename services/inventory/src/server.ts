@@ -1,5 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
-import { type HttpMetrics } from '@otel-demo/telemetry';
+import { routeOperation, type HttpMetrics } from '@otel-demo/telemetry';
 
 /** Stock for electronics SKUs. Out of stock will be HTTP 409, a business outcome rather than a server error. Its database will be its own. */
 export const SERVICE_NAME = 'inventory';
@@ -13,7 +13,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false });
   app.addHook('onResponse', async (request, reply) => {
     options.metrics?.record({
-      operation: `${request.method} ${request.routeOptions.url ?? 'unmatched'}`,
+      operation: routeOperation(request.routeOptions.url),
       method: request.method,
       statusCode: reply.statusCode,
       durationMs: reply.elapsedTime,

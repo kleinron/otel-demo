@@ -18,6 +18,8 @@ import {
   HTTP_SERVER_ERRORS_METRIC,
   HTTP_SERVER_REQUESTS_METRIC,
   httpServerDurationView,
+  routeOperation,
+  UNMATCHED_ROUTE_OPERATION,
 } from '../src/index.js';
 
 describe('HTTP status classification', () => {
@@ -45,6 +47,18 @@ describe('histogram percentiles', () => {
     expect(estimateHistogramPercentile(buckets, 95)).toBe(100);
     expect(estimateHistogramPercentile(buckets, 99)).toBe(1000);
     expect(estimateHistogramPercentile({ boundaries: [10], counts: [0, 0] }, 50)).toBeUndefined();
+  });
+});
+
+describe('route operation labels', () => {
+  it('keeps the route template and drops raw URLs that are not templates', () => {
+    expect(routeOperation('/cart/items/:id')).toBe('/cart/items/:id');
+    expect(routeOperation('/health?verbose=1')).toBe('/health');
+    expect(routeOperation(undefined)).toBe(UNMATCHED_ROUTE_OPERATION);
+    expect(routeOperation('')).toBe(UNMATCHED_ROUTE_OPERATION);
+    expect(routeOperation('http://collector.internal/cart/items/sku-42')).toBe(
+      UNMATCHED_ROUTE_OPERATION,
+    );
   });
 });
 
@@ -132,6 +146,50 @@ describe('HTTP metrics', () => {
         (attributes) => attributes.business_outcome === 'out_of_stock',
       ),
     ).toBe(4);
+
+    await provider.shutdown();
+  });
+
+  it('places a 20 second sample above 5000 ms so a p99 past 5 seconds can fire', async () => {
+    const exporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
+    const reader = new PeriodicExportingMetricReader({
+      exporter,
+      exportIntervalMillis: 60_000,
+    });
+    const provider = new MeterProvider({
+      readers: [reader],
+      views: [httpServerDurationView()],
+    });
+    const metrics = createHttpMetrics(provider.getMeter('shop'), { service: 'shop' });
+
+    metrics.record({
+      operation: '/cart/items/:id',
+      method: 'POST',
+      statusCode: 500,
+      durationMs: 20_000,
+      service: 'shop',
+    });
+
+    await provider.forceFlush();
+    const duration = histogram(flatten(exporter.getMetrics()), HTTP_SERVER_DURATION_METRIC);
+    const point = duration.dataPoints.find(
+      (candidate) => candidate.attributes.operation === '/cart/items/:id',
+    );
+    const buckets = point?.value.buckets;
+    expect(buckets?.boundaries).toEqual([...HTTP_LATENCY_BUCKET_BOUNDARIES_MS]);
+    expect(buckets?.boundaries).toEqual(expect.arrayContaining([10000, 30000, 60000]));
+
+    const counts = buckets?.counts ?? [];
+    const boundaries = buckets?.boundaries ?? [];
+    const landedIndex = counts.findIndex((count) => count > 0);
+    const landedBoundary =
+      landedIndex >= 0 && landedIndex < boundaries.length
+        ? boundaries[landedIndex]
+        : boundaries[boundaries.length - 1];
+    expect(landedBoundary).toBeGreaterThan(5000);
+    expect(
+      estimateHistogramPercentile(buckets ?? { boundaries: [], counts: [] }, 99),
+    ).toBeGreaterThan(5000);
 
     await provider.shutdown();
   });
