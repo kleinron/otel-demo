@@ -25,11 +25,23 @@ services/inventory     stock (health endpoint only)
 services/payment       dummy payment provider (health endpoint only)
 services/delivery      delivery handoff (health endpoint only)
 loadgen                placeholder for later scenarios
-infra/aws              placeholder for later CDK
-docs                   architecture and telemetry notes
+infra/aws              experiment tag, teardown, and deploy guard
+docs                   architecture, telemetry, and teardown runbook
 ```
 
 `results/` and `raw/` are local experiment output and are gitignored.
+
+## AWS safety tooling
+
+No ECS or RDS stack is created from this repo yet. Before one is, the teardown and deploy guard in `infra/aws` are the gate. The only experiment tag is `experiment=otel-demo`. The Budgets alert `otel-demo-experiment` is allow-listed by name and is not deleted; Ron deletes it by hand after the experiment is fully finished.
+
+```bash
+npm run teardown -- --dry-run
+npm run teardown -- --region eu-central-1
+EXPERIMENT_HARD_STOP_UTC=2026-10-17T00:00:00Z npm run deploy:check
+```
+
+Runbook: [docs/teardown.md](docs/teardown.md). Tag contract: [infra/aws/README.md](infra/aws/README.md).
 
 ## Requirements
 

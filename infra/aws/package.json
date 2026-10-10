@@ -1,0 +1,30 @@
+{
+  "name": "@otel-demo/infra-aws",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AWS safety tooling for the otel-demo experiment: tags, deploy guard, and teardown.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@aws-sdk/client-budgets": "^3.901.0",
+    "@aws-sdk/client-cloudformation": "^3.901.0",
+    "@aws-sdk/client-cloudwatch": "^3.901.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.901.0",
+    "@aws-sdk/client-ec2": "^3.901.0",
+    "@aws-sdk/client-ecr": "^3.901.0",
+    "@aws-sdk/client-ecs": "^3.901.0",
+    "@aws-sdk/client-elastic-load-balancing": "^3.901.0",
+    "@aws-sdk/client-elastic-load-balancing-v2": "^3.901.0",
+    "@aws-sdk/client-rds": "^3.901.0",
+    "@aws-sdk/client-resource-groups-tagging-api": "^3.901.0",
+    "@aws-sdk/client-s3": "^3.901.0",
+    "@aws-sdk/client-service-quotas": "^3.901.0",
+    "@aws-sdk/client-sts": "^3.901.0",
+    "@aws-sdk/credential-providers": "^3.901.0"
+  }
+}

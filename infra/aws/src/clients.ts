@@ -1,0 +1,44 @@
+import { BudgetsClient } from '@aws-sdk/client-budgets';
+import { CloudFormationClient } from '@aws-sdk/client-cloudformation';
+import { CloudWatchClient } from '@aws-sdk/client-cloudwatch';
+import { CloudWatchLogsClient } from '@aws-sdk/client-cloudwatch-logs';
+import { EC2Client } from '@aws-sdk/client-ec2';
+import { ECRClient } from '@aws-sdk/client-ecr';
+import { ECSClient } from '@aws-sdk/client-ecs';
+import { ElasticLoadBalancingClient } from '@aws-sdk/client-elastic-load-balancing';
+import { ElasticLoadBalancingV2Client } from '@aws-sdk/client-elastic-load-balancing-v2';
+import { RDSClient } from '@aws-sdk/client-rds';
+import { ResourceGroupsTaggingAPIClient } from '@aws-sdk/client-resource-groups-tagging-api';
+import { S3Client } from '@aws-sdk/client-s3';
+import { ServiceQuotasClient } from '@aws-sdk/client-service-quotas';
+import { STSClient } from '@aws-sdk/client-sts';
+import type { SdkClient, SdkCommand, TeardownClients } from './types.js';
+
+const USER_AGENT = 'otel-demo-safety';
+
+function asSdk(client: object): SdkClient {
+  const sender = client as { send: (command: SdkCommand) => Promise<unknown> };
+  return {
+    send: (command) => sender.send(command),
+  };
+}
+
+export function createClients(region: string, budgetsRegion: string): TeardownClients {
+  const settings = { region, customUserAgent: USER_AGENT };
+  return {
+    sts: asSdk(new STSClient(settings)),
+    tagging: asSdk(new ResourceGroupsTaggingAPIClient(settings)),
+    cloudwatch: asSdk(new CloudWatchClient(settings)),
+    logs: asSdk(new CloudWatchLogsClient(settings)),
+    rds: asSdk(new RDSClient(settings)),
+    ec2: asSdk(new EC2Client(settings)),
+    elbv2: asSdk(new ElasticLoadBalancingV2Client(settings)),
+    elb: asSdk(new ElasticLoadBalancingClient(settings)),
+    ecr: asSdk(new ECRClient(settings)),
+    ecs: asSdk(new ECSClient(settings)),
+    s3: asSdk(new S3Client(settings)),
+    cloudformation: asSdk(new CloudFormationClient(settings)),
+    budgets: asSdk(new BudgetsClient({ region: budgetsRegion, customUserAgent: USER_AGENT })),
+    serviceQuotas: asSdk(new ServiceQuotasClient(settings)),
+  };
+}

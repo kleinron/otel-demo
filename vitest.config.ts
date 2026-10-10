@@ -15,6 +15,7 @@ export default defineConfig({
       'packages/**/test/**/*.test.ts',
       'services/**/test/**/*.test.ts',
       'loadgen/test/**/*.test.ts',
+      'infra/**/test/**/*.test.ts',
     ],
     exclude: ['**/dist/**', '**/node_modules/**'],
   },
