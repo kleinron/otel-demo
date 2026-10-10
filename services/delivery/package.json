@@ -1,0 +1,20 @@
+{
+  "name": "@otel-demo/delivery",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Delivery handoff.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@otel-demo/telemetry": "*",
+    "fastify": "^5.12.5"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/telemetry" },
+    { "path": "services/shop" },
+    { "path": "services/inventory" },
+    { "path": "services/payment" },
+    { "path": "services/delivery" },
+    { "path": "loadgen" }
+  ]
+}
