@@ -4,6 +4,7 @@ import {
   createHttpMetrics,
   createLogger,
   createOutboundMetrics,
+  databaseFaultHook,
   getServiceMeter,
   startFaultControl,
   startTelemetry,
@@ -17,8 +18,17 @@ const logger = createLogger({ service: SERVICE_NAME });
 const meter = getServiceMeter(SERVICE_NAME);
 const metrics = createHttpMetrics(meter, { service: SERVICE_NAME });
 const outbound = createOutboundMetrics(meter, { service: SERVICE_NAME });
+const faults = await startFaultControl(env, {
+  info(message, fields) {
+    logger.info(fields ?? {}, message);
+  },
+  warn(message, fields) {
+    logger.warn(fields ?? {}, message);
+  },
+});
 const sql = await connectPg(requiredEnv(env.DATABASE_URL, 'DATABASE_URL'), {
   timeoutMs: readTimeoutMs(env.DB_STATEMENT_TIMEOUT_MS, 5_000),
+  beforeQuery: databaseFaultHook(faults, SERVICE_NAME),
   onCall(event) {
     outbound.record({
       target: 'database',
@@ -28,14 +38,6 @@ const sql = await connectPg(requiredEnv(env.DATABASE_URL, 'DATABASE_URL'), {
   },
 });
 await migrateShop(sql);
-const faults = await startFaultControl(env, {
-  info(message, fields) {
-    logger.info(fields ?? {}, message);
-  },
-  warn(message, fields) {
-    logger.warn(fields ?? {}, message);
-  },
-});
 const app = buildApp({
   metrics,
   outbound,

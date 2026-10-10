@@ -35,6 +35,10 @@ Reference data is loaded by `npm run seed`: 1000 deterministic customers (Englis
 
 Process configuration comes from environment variables. Provider-specific code is allowed only under `infra/<provider>/`. `infra/aws/` holds the experiment tag, the teardown command, and the deploy guard. It does not yet define the ECS or RDS stacks. Application packages do not import a cloud SDK.
 
+## Load
+
+`loadgen` sends browse, cart, checkout, and order-status traffic to shop at a fixed arrival rate. The schedule, the Jerusalem day-night curve, and the fault windows are described in [loadgen/README.md](../loadgen/README.md).
+
 ## Telemetry
 
 Shared instrumentation lives in `packages/telemetry`. See [telemetry.md](telemetry.md).

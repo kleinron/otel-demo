@@ -1,0 +1,117 @@
+{
+  "seed": 20261010,
+  "curve": {
+    "zone": "Asia/Jerusalem",
+    "peakLocalHour": 16,
+    "amplitude": 0.6,
+    "cartActivitiesPerDay": 100000,
+    "checkoutsPerDay": 3000,
+    "browsePerDay": 90000,
+    "orderStatusPerDay": 6000
+  },
+  "experiment": {
+    "start": "2026-10-12T08:30:00.000Z",
+    "zone": "UTC",
+    "durationHours": 72
+  },
+  "warmup": {
+    "minutes": 5,
+    "zone": "UTC"
+  },
+  "caps": {
+    "maxArrivalsPerSecond": 40,
+    "maxDurationHours": 72,
+    "zone": "UTC"
+  },
+  "saturation": {
+    "spike": "checkout-delay",
+    "dayOffset": 1,
+    "zone": "UTC"
+  },
+  "paymentTimeoutMs": 2000,
+  "customers": {
+    "count": 1000
+  },
+  "skus": [
+    "phone-aurora",
+    "phone-carmel",
+    "phone-negev",
+    "headphones-galilee",
+    "headphones-sharon",
+    "powerbank-carmel",
+    "laptop-carmel-14",
+    "laptop-negev-16"
+  ],
+  "outOfStock": {
+    "sku": "powerbank-dead-sea",
+    "qty": 2,
+    "fraction": 0.15
+  },
+  "spikes": [
+    {
+      "name": "add-to-cart-delay",
+      "at": "10:00",
+      "zone": "UTC",
+      "durationMinutes": 20,
+      "multiplier": 3,
+      "fault": {
+        "service": "shop",
+        "operation": "add-to-cart",
+        "type": "delay",
+        "sizeMs": 1200,
+        "startOffsetMinutes": 2,
+        "durationMinutes": 15,
+        "zone": "UTC"
+      }
+    },
+    {
+      "name": "checkout-delay",
+      "at": "12:00",
+      "zone": "UTC",
+      "durationMinutes": 20,
+      "multiplier": 3,
+      "saturationMultiplier": 8,
+      "fault": {
+        "service": "shop",
+        "operation": "checkout",
+        "type": "delay",
+        "sizeMs": 3000,
+        "startOffsetMinutes": 2,
+        "durationMinutes": 20,
+        "zone": "UTC"
+      }
+    },
+    {
+      "name": "inventory-db-timeout",
+      "at": "14:00",
+      "zone": "UTC",
+      "durationMinutes": 20,
+      "multiplier": 3,
+      "fault": {
+        "service": "inventory",
+        "operation": "database",
+        "type": "timeout",
+        "sizeMs": 8000,
+        "startOffsetMinutes": 2,
+        "durationMinutes": 15,
+        "zone": "UTC"
+      }
+    },
+    {
+      "name": "payment-delay",
+      "at": "20:00",
+      "zone": "UTC",
+      "durationMinutes": 20,
+      "multiplier": 3,
+      "fault": {
+        "service": "payment",
+        "operation": "charge",
+        "type": "delay",
+        "sizeMs": 5000,
+        "startOffsetMinutes": 2,
+        "durationMinutes": 15,
+        "zone": "UTC"
+      }
+    }
+  ]
+}

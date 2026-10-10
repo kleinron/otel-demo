@@ -38,6 +38,8 @@ services:
       DATABASE_URL: postgres://otel@postgres:5432/inventory
       LISTEN_ANY: 'true'
       PORT: '3002'
+      OTEL_DEMO_LOAD_SCHEDULE_FILE: /app/loadgen/schedule.json
+      OTEL_DEMO_FAULTS_ENABLED: ${OTEL_DEMO_FAULTS_ENABLED:-false}
     ports:
       - '3002:3002'
     depends_on:
@@ -54,6 +56,8 @@ services:
       PAYMENT_LATENCY_MS: '0'
       LISTEN_ANY: 'true'
       PORT: '3003'
+      OTEL_DEMO_LOAD_SCHEDULE_FILE: /app/loadgen/schedule.json
+      OTEL_DEMO_FAULTS_ENABLED: ${OTEL_DEMO_FAULTS_ENABLED:-false}
     ports:
       - '3003:3003'
     depends_on:
@@ -69,6 +73,8 @@ services:
       DATABASE_URL: postgres://otel@postgres:5432/delivery
       LISTEN_ANY: 'true'
       PORT: '3004'
+      OTEL_DEMO_LOAD_SCHEDULE_FILE: /app/loadgen/schedule.json
+      OTEL_DEMO_FAULTS_ENABLED: ${OTEL_DEMO_FAULTS_ENABLED:-false}
     ports:
       - '3004:3004'
     depends_on:
@@ -87,6 +93,8 @@ services:
       DELIVERY_URL: http://delivery:3004
       LISTEN_ANY: 'true'
       PORT: '3001'
+      OTEL_DEMO_LOAD_SCHEDULE_FILE: /app/loadgen/schedule.json
+      OTEL_DEMO_FAULTS_ENABLED: ${OTEL_DEMO_FAULTS_ENABLED:-false}
     ports:
       - '3001:3001'
     depends_on:
@@ -99,3 +107,14 @@ services:
       delivery:
         condition: service_healthy
     healthcheck: *http-health
+
+  loadgen:
+    profiles: ['load']
+    build:
+      context: .
+      dockerfile: loadgen/Dockerfile
+    environment:
+      SHOP_URL: http://shop:3001
+    depends_on:
+      shop:
+        condition: service_healthy
