@@ -8,6 +8,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./fault-switch": {
+      "types": "./dist/fault-switch.d.ts",
+      "import": "./dist/fault-switch.js"
     }
   },
   "dependencies": {
@@ -28,6 +32,7 @@
     "@aws-sdk/client-s3": "^3.901.0",
     "@aws-sdk/client-secrets-manager": "^3.901.0",
     "@aws-sdk/client-service-quotas": "^3.901.0",
+    "@aws-sdk/client-ssm": "^3.901.0",
     "@aws-sdk/client-sts": "^3.901.0",
     "@aws-sdk/credential-providers": "^3.901.0"
   }

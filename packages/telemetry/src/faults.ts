@@ -1,6 +1,6 @@
 import { type Span } from '@opentelemetry/api';
 
-export const FAULT_TYPES = ['delay', 'error', 'drop'] as const;
+export const FAULT_TYPES = ['delay', 'error', 'drop', 'timeout'] as const;
 
 export type FaultType = (typeof FAULT_TYPES)[number];
 
@@ -9,8 +9,10 @@ export interface FaultSpec {
   type: FaultType;
   service?: string;
   operation?: string;
-  /** Stored for a later phase. The skeleton does not roll this probability. */
+  /** Stored on the spec. `noteConfiguredFault` does not roll it; `applyMatchedFault` does. */
   probability?: number;
+  /** Milliseconds to wait before a delay returns or a timeout/error is raised. */
+  delayMs?: number;
 }
 
 export interface FaultInjectionConfig {
@@ -53,7 +55,20 @@ export function loadFaultInjectionConfig(
   if (!Array.isArray(parsed)) {
     throw new Error('OTEL_DEMO_FAULTS must be a JSON array');
   }
-  return { enabled: true, faults: parsed.map((entry, index) => parseFault(entry, index)) };
+  return { enabled: true, faults: parseFaultSpecs(parsed) };
+}
+
+/** Parse a fault list. Does not consult the kill switch. */
+export function parseFaultSpecs(value: unknown): FaultSpec[] {
+  if (!Array.isArray(value)) {
+    throw new Error('OTEL_DEMO_FAULTS must be a JSON array');
+  }
+  return value.map((entry, index) => parseFault(entry, index));
+}
+
+/** Faults whose service and operation match the target. An omitted field matches any value. */
+export function matchingFaults(faults: readonly FaultSpec[], target: FaultTarget): FaultSpec[] {
+  return faults.filter((fault) => matches(fault, target));
 }
 
 /**
@@ -70,7 +85,7 @@ export function noteConfiguredFault(
   if (!config.enabled) {
     return [];
   }
-  const matched = config.faults.filter((fault) => matches(fault, target));
+  const matched = matchingFaults(config.faults, target);
   if (matched.length === 0) {
     return [];
   }
@@ -128,6 +143,12 @@ function parseFault(value: unknown, index: number): FaultSpec {
       throw new Error(`OTEL_DEMO_FAULTS[${index}].probability must be between 0 and 1`);
     }
     fault.probability = record.probability;
+  }
+  if (record.delayMs !== undefined) {
+    if (typeof record.delayMs !== 'number' || Number.isNaN(record.delayMs) || record.delayMs < 0) {
+      throw new Error(`OTEL_DEMO_FAULTS[${index}].delayMs must be a non-negative number`);
+    }
+    fault.delayMs = record.delayMs;
   }
   return fault;
 }

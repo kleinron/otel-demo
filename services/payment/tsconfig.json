@@ -5,5 +5,9 @@
     "rootDir": "src"
   },
   "include": ["src"],
-  "references": [{ "path": "../../packages/telemetry" }]
+  "references": [
+    { "path": "../../packages/telemetry" },
+    { "path": "../../packages/db" },
+    { "path": "../../packages/httpkit" }
+  ]
 }
