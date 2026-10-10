@@ -7,6 +7,13 @@
 # The 5xx numerator is HTTP status 500-599 only. HTTP 409 is an allocation
 # conflict and is counted only by inventory-allocation-conflict-rate.
 # Database-timeout and payment-delay fault injection exist and default to off.
+#
+# missing_data is how an alarm treats a window with no datapoints.
+# Ratio (5xx) and latency (p99) alarms set not_breaching: a stopped load
+# generator or a quiet period produces no datapoints and must not count as
+# a failure. Count-based alarms (database timeouts, payments stuck) also set
+# not_breaching. request-rate-zero sets breaching: no data means a dead load
+# generator or broken routing.
 
 version: 1
 
@@ -20,6 +27,7 @@ alerts:
     threshold: '2%'
     window: '5m'
     min_request_count: 20
+    missing_data: not_breaching
     severity: critical
     why: 'A sustained server-error rate on add-to-cart means shoppers cannot fill a cart, which stops the funnel before checkout.'
 
@@ -32,6 +40,7 @@ alerts:
     threshold: '2%'
     window: '5m'
     min_request_count: 20
+    missing_data: not_breaching
     severity: critical
     why: 'Server errors on remove-from-cart leave items in the cart after the shopper tried to drop them, so checkout sees a cart they did not intend.'
 
@@ -44,6 +53,7 @@ alerts:
     threshold: '2%'
     window: '5m'
     min_request_count: 10
+    missing_data: not_breaching
     severity: critical
     why: 'Checkout is the customer-facing call that places the order, so a 5xx rate here means orders are failing across shop, inventory, and payment.'
 
@@ -56,6 +66,7 @@ alerts:
     threshold: '2%'
     window: '5m'
     min_request_count: 20
+    missing_data: not_breaching
     severity: critical
     why: 'Order status is how a customer sees whether checkout finished, and server errors here hide a stuck payment or delivery.'
 
@@ -68,6 +79,7 @@ alerts:
     threshold: '800ms'
     window: '5m'
     min_request_count: 20
+    missing_data: not_breaching
     severity: warning
     why: "Add-to-cart is a short shop call, and a p99 above 800ms is the initial signal that this path is slower than the experiment's latency budget."
 
@@ -80,6 +92,7 @@ alerts:
     threshold: '2s'
     window: '15m'
     min_request_count: 30
+    missing_data: not_breaching
     severity: warning
     why: 'Checkout is low volume, so a p99 over a short window is just the slowest request.'
 
@@ -91,6 +104,7 @@ alerts:
     condition: 'count of timed-out database client operations is above the threshold'
     threshold: '0'
     window: '5m'
+    missing_data: not_breaching
     severity: warning
     why: 'Timeouts on the shop database stall cart reads and writes, and they are unexpected while database-timeout injection is left at its default of off.'
 
@@ -102,6 +116,7 @@ alerts:
     condition: 'count of timed-out database client operations is above the threshold'
     threshold: '0'
     window: '5m'
+    missing_data: not_breaching
     severity: warning
     why: 'Timeouts on the inventory database stall allocation and stock checks, and they are unexpected while database-timeout injection is left at its default of off.'
 
@@ -113,6 +128,7 @@ alerts:
     condition: 'count of timed-out database client operations is above the threshold'
     threshold: '0'
     window: '5m'
+    missing_data: not_breaching
     severity: warning
     why: 'Timeouts on the payment database can leave a charge unknown or authorized without capture, and they are unexpected while database-timeout injection is left at its default of off.'
 
@@ -124,6 +140,7 @@ alerts:
     condition: 'count of timed-out database client operations is above the threshold'
     threshold: '0'
     window: '5m'
+    missing_data: not_breaching
     severity: warning
     why: 'Timeouts on the delivery database stall order progress after payment, and they are unexpected while database-timeout injection is left at its default of off.'
 
@@ -135,6 +152,7 @@ alerts:
     condition: 'count of payments in state unknown for longer than the threshold is at least 1'
     threshold: '2m'
     window: '5m'
+    missing_data: not_breaching
     severity: critical
     why: 'A payment left in unknown has an unresolved charge outcome, and retrying it blindly can double-charge the customer.'
 
@@ -146,6 +164,7 @@ alerts:
     condition: 'count of payments in state authorized with no capture for longer than the threshold is at least 1'
     threshold: '2m'
     window: '5m'
+    missing_data: not_breaching
     severity: critical
     why: 'A payment left authorized without capture holds customer funds without completing the order.'
 
@@ -183,6 +202,18 @@ alerts:
     window: '5m'
     severity: warning
     why: 'A load generator running above its configured rate or concurrency caps makes latency and error alerts describe an overload rather than the intended experiment.'
+
+  - name: request-rate-zero
+    signal: metric
+    scope:
+      service: shop
+      operation: all
+    condition: 'total customer-facing request count is zero'
+    threshold: '0 requests'
+    window: '10m'
+    missing_data: breaching
+    severity: warning
+    why: 'A window with zero customer-facing shop requests flags a dead runner or broken routing, so a silent system is not mistaken for a healthy one; a known runner restart or the warm-up before the first spike is an expected false positive to record when scoring.'
 
   - name: experiment-budget
     signal: metric

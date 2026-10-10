@@ -47,13 +47,15 @@ Fill this in after the run. One row per alarm in [alerts.yml](alerts.yml). Count
 
 **either is fine** is not a true positive and not a missed detection. Record which way it went in the write-up. A **should not fire** alarm that enters `ALARM` is an extra alert: count it as a false positive when it falls during normal load, and write it up either way.
 
-| Alarm | True positives | False positives during normal load | Missed detections | Time-to-fire |
-| ----- | -------------- | ---------------------------------- | ----------------- | ------------ |
-|       |                |                                    |                   |              |
-|       |                |                                    |                   |              |
-|       |                |                                    |                   |              |
+`request-rate-zero` uses `missing_data: breaching`. An unplanned silence (a dead runner or broken routing) is a true positive. A planned gap — a known runner restart, or the warm-up before the first spike — is an expected false positive: record it, and do not tune the alarm away for that gap. During a spike that is actually sending traffic, this alarm **should not fire**.
 
-Copy a row for every alarm in the catalog. The paired names are `shop-add-to-cart-p99-latency`, `shop-checkout-p99-latency`, `inventory-db-timeout-count`, `shop-checkout-5xx-rate`, and `payment-stuck-unknown`. The other rows are where extra alerts and normal-load false positives show up.
+| Alarm               | True positives | False positives during normal load | Missed detections | Time-to-fire |
+| ------------------- | -------------- | ---------------------------------- | ----------------- | ------------ |
+| `request-rate-zero` |                |                                    |                   |              |
+|                     |                |                                    |                   |              |
+|                     |                |                                    |                   |              |
+
+Copy a row for every other alarm in the catalog. The paired names are `shop-add-to-cart-p99-latency`, `shop-checkout-p99-latency`, `inventory-db-timeout-count`, `shop-checkout-5xx-rate`, and `payment-stuck-unknown`. The other rows are where extra alerts and normal-load false positives show up.
 
 ### Tuning actions per finding
 
