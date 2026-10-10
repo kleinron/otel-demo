@@ -1,6 +1,6 @@
 # otel-demo
 
-Observability experiment: a small electronics store, fully instrumented, with cloud-specific code kept out of the services. The services are still health endpoints. The AWS demo stack is CDK in `infra/aws`. Order, stock, payment, and delivery behavior are not implemented yet. This repository synthesizes and tests that stack. It does not deploy it.
+Observability experiment: a small electronics store, fully instrumented, with cloud-specific code kept out of the services. A checkout is one order that moves `cart -> reserved -> paid -> handed_to_delivery`, and one successful checkout is one W3C trace across shop, inventory, payment, and delivery. The AWS demo stack is CDK in `infra/aws`. This repository synthesizes and tests that stack. It does not deploy it.
 
 ## Architecture
 
@@ -19,14 +19,17 @@ Details: [docs/architecture.md](docs/architecture.md). Instrumentation: [docs/te
 ## Layout
 
 ```text
-packages/telemetry     OpenTelemetry Node SDK, JSON logs, HTTP metrics
-services/shop          order orchestration (health endpoint only)
-services/inventory     stock (health endpoint only)
-services/payment       dummy payment provider (health endpoint only)
-services/delivery      delivery handoff (health endpoint only)
-loadgen                placeholder for later scenarios
-infra/aws              CDK demo stack, experiment tag, teardown, and deploy guard
+packages/telemetry     OpenTelemetry Node SDK, JSON logs, HTTP and outbound metrics, fault control
+packages/db            Postgres client used by each service for its own database
+packages/httpkit       Server spans, W3C traceparent client, listen helpers
+services/shop          cart, checkout, order status
+services/inventory     catalog, warehouse stock, reserve and release
+services/payment       dummy charges: authorized, captured, declined, unknown
+services/delivery      handoff, packaging, shipped
+loadgen                open-loop shop load, fixed arrival rate, UTC spikes
+infra/aws              CDK demo stack, teardown, deploy guard, SSM fault-switch reader
 docs                   architecture, telemetry, and teardown runbook
+docker-compose.yml     local Postgres and the four services
 ```
 
 `results/` and `raw/` are local experiment output and are gitignored.
@@ -81,7 +84,22 @@ npm run lint
 npm run format:check
 ```
 
-`npm test` runs Vitest for the telemetry package, the four service health checks, and the loadgen placeholder. `npm run build` compiles the workspaces with TypeScript project references.
+`npm test` runs Vitest for the telemetry package, service behavior, the seed rebuild, a checkout trace that spans all four services, and the load generator schedule. The trace test also drops `traceparent` on each hop and expects the trace to split. Tests use in-process Postgres, so they do not need Docker. `npm run build` compiles the workspaces with TypeScript project references.
+
+## Local databases
+
+`docker compose up --build` starts Postgres and the four services. Each service has its own database and talks to the others over HTTP. Seed reference data after Postgres is healthy:
+
+```bash
+docker compose up -d postgres
+SHOP_DATABASE_URL=postgres://otel@localhost:5432/shop \
+INVENTORY_DATABASE_URL=postgres://otel@localhost:5432/inventory \
+PAYMENT_DATABASE_URL=postgres://otel@localhost:5432/payment \
+DELIVERY_DATABASE_URL=postgres://otel@localhost:5432/delivery \
+npm run seed
+```
+
+`npm run seed` drops and recreates each service schema, then inserts 1000 deterministic Israeli customers, the electronics catalog, and warehouse stock. Running it again replaces a partially filled database with that same data. The Postgres container trusts local connections; do not reuse that setting outside this compose file.
 
 ## Run a service
 
@@ -100,6 +118,15 @@ Health checks:
 | delivery  | `http://localhost:3004/health` |
 
 Point traces and metrics at a collector with `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4318`). The exporter is OTLP/HTTP. Logs are JSON on stdout and include `trace_id`, `span_id`, an X-Ray-format trace id, `service`, and `orderId` when the request has one.
+
+## Load
+
+`loadgen/` plays browse, cart, checkout, and order-status flows against shop at a fixed arrival rate. The plan is `loadgen/schedule.json`. See [loadgen/README.md](loadgen/README.md).
+
+```bash
+npm run build
+SHOP_URL=http://localhost:3001 npm run start -w @otel-demo/loadgen
+```
 
 ## Secrets
 

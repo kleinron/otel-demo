@@ -16,6 +16,10 @@ The Budgets alert named `otel-demo-experiment` is allow-listed by that exact nam
 
 `CDKToolkit` and `cdk-*` asset buckets stay. They are bootstrap, not experiment resources.
 
+## Fault kill switch
+
+Application services do not import the AWS SDK. When a task must poll SSM, set `FAULT_SWITCH_SOURCE=module` and `FAULT_SWITCH_MODULE=@otel-demo/infra-aws/fault-switch`. `createFaultSwitch` reads the parameter `/otel-demo/faults-enabled` unless `FAULT_SWITCH_SSM_PARAMETER` overrides it. This package does not create that parameter.
+
 ## Commands
 
 From the repo root:

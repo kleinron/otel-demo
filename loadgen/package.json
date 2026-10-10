@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Placeholder for later load scenarios.",
+  "description": "Open-loop shop load for the observability demo.",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -12,5 +12,9 @@
   },
   "scripts": {
     "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@otel-demo/telemetry": "*",
+    "undici": "^7.16.0"
   }
 }

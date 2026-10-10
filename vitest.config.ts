@@ -7,6 +7,10 @@ export default defineConfig({
       '@otel-demo/telemetry': fileURLToPath(
         new URL('./packages/telemetry/src/index.ts', import.meta.url),
       ),
+      '@otel-demo/db': fileURLToPath(new URL('./packages/db/src/index.ts', import.meta.url)),
+      '@otel-demo/httpkit': fileURLToPath(
+        new URL('./packages/httpkit/src/index.ts', import.meta.url),
+      ),
     },
   },
   test: {

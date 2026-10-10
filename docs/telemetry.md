@@ -62,23 +62,40 @@ Redaction happens in the logger:
 
 `estimateHistogramPercentile` reads an explicit-bucket histogram and returns the inclusive upper bound of the bucket that crosses the percentile. A sample past the last boundary (60s) is reported as that boundary.
 
+## Outbound metrics
+
+`createOutboundMetrics` records `outbound.calls` for calls to another service and for calls to the service database. Attributes are `service`, `target` (`inventory`, `payment`, `delivery`, `shop`, or `database`), `outcome` (`success`, `error`, or `timeout`), and `operation`. `operation` is a logical name such as `reserve` or `order.write`. A raw URL is recorded as `unmatched`.
+
+HTTP 409 from inventory is `outcome=success` on the outbound counter because the call completed. The server-side business counter still records `out_of_stock`, and `http.server.errors` still counts only 5xx.
+
 ## Fault injection
 
-Off by default. Nothing is delayed, failed, or dropped in this phase.
+Faults are delay, error, drop, or timeout on a named operation (`reserve`, `charge`, `capture`, `handoff`, `checkout`, and the other route operations). The schedule is read once at startup. The kill switch is polled every 5–10 seconds (default 7.5s).
 
-| Variable                   | Role                                                                                                                                                                 |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OTEL_DEMO_FAULTS_ENABLED` | Must be `true`, `1`, or `on`. Anything else, including unset, leaves injection off and ignores the fault list.                                                       |
-| `OTEL_DEMO_FAULTS`         | JSON array, read only when injection is enabled. Each object has `id`, `type` (`delay`, `error`, or `drop`), and optional `service`, `operation`, and `probability`. |
+| Variable                        | Role                                                                                                                    |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `OTEL_DEMO_FAULTS`              | JSON array. Each object has `id`, `type`, and optional `service`, `operation`, `probability`, and `delayMs`.            |
+| `OTEL_DEMO_FAULT_SCHEDULE`      | JSON object `{ windowStart, windowEnd, faults }`. Window timestamps are ISO-8601 UTC.                                   |
+| `OTEL_DEMO_FAULT_SCHEDULE_FILE` | Path to that object. Read once at startup.                                                                              |
+| `OTEL_DEMO_FAULT_WINDOW_START`  | Window start when the schedule is the `OTEL_DEMO_FAULTS` array.                                                         |
+| `OTEL_DEMO_FAULT_WINDOW_END`    | Window end. Faults stop at this instant. The process logs `fault window end` with `at` in UTC.                          |
+| `OTEL_DEMO_FAULTS_ENABLED`      | Env kill switch when `FAULT_SWITCH_SOURCE=env` (the default). `true`, `1`, or `on` enables the loaded schedule.         |
+| `FAULT_SWITCH_SOURCE`           | `env`, `file`, or `module`. `ssm` is rejected in application code.                                                      |
+| `FAULT_SWITCH_FILE`             | File polled when the source is `file`. Contents are `on` or `off`.                                                      |
+| `FAULT_SWITCH_MODULE`           | Module specifier that exports `createFaultSwitch`. On AWS this is `@otel-demo/infra-aws/fault-switch`, which reads SSM. |
+| `FAULT_SWITCH_SSM_PARAMETER`    | Read by the infra module. Default `/otel-demo/faults-enabled`.                                                          |
+| `FAULT_SWITCH_POLL_MS`          | Poll interval, clamped to 5000–10000.                                                                                   |
 
-`noteConfiguredFault` records every matching fault on the current span as configured, not applied:
+A successful read of `off` logs `faults off by operator` once for that transition. A failed read keeps the last successful value. Faults turn off with the log line `faults off by fail-safe` only after 3 consecutive failed reads and 60 seconds since the last successful read. The first poll inside an open window logs `fault window start` with `at` in UTC. Reaching `windowEnd` logs `fault window end` and stops injection without waiting for the kill switch.
 
-- `fault.configured` = `true` when a fault rule matched and was not performed
-- `fault.id` = every matching id
-- `fault.type` = every matching type
-- `fault.injected` stays unset
+`noteConfiguredFault` still records a match that was not performed (`fault.configured`, no `fault.injected`). `applyMatchedFault` performs the first matching fault whose probability roll succeeds (omitted probability is 1):
 
-`fault.injected` is reserved for a fault that was actually applied (the delay, error, or drop ran). This phase never applies a fault, so it never sets `fault.injected`. `probability` is stored and not rolled.
+- `delay` sets `fault.injected` and waits `delayMs`. The span stays unset so a slow success is not an error.
+- `error`, `timeout`, and `drop` set `fault.injected`, `fault.id`, `fault.type`, span status ERROR, and throw.
+
+`loadFaultInjectionConfig` is unchanged: it still returns an empty list unless `OTEL_DEMO_FAULTS_ENABLED` is set, and it does not apply faults. The running services use `loadFaultSchedule` plus the polled switch.
+
+`OTEL_DEMO_LOAD_SCHEDULE_FILE` points at the load generator schedule (`loadgen/schedule.json`). When it is set, that file replaces the single fault window: each spike's fault block becomes its own UTC window, the first spike of the experiment stays a baseline with no fault, and the kill switch is still required. `LOADGEN_START_UTC` and `LOADGEN_SEED` override the file for both the generator and the services. A database `timeout` fault fails the SQL call before the driver and records `outcome=timeout`. `ping` is not faulted. Window start and end are logged in UTC. A process that starts inside a window does not log that start again.
 
 ## Service ports
 

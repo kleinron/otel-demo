@@ -11,6 +11,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./fault-switch": {
+      "types": "./dist/fault-switch.d.ts",
+      "import": "./dist/fault-switch.js"
     }
   },
   "dependencies": {
