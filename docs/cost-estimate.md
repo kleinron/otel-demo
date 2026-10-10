@@ -4,7 +4,7 @@ The experiment keeps database backups off.
 
 ## Revised expectation
 
-Revised expectation: with the agreed load profile (~2.5 req/s avg) logs are expected at 1-2 GB, below the Low scenario (5 GB); the Low column is the closest match. 5/20/50 GB were bracketing assumptions, not measurements.
+Revised expectation: with the agreed load profile (~2.5 req/s avg) logs are expected at 1-2 GB, below the Low scenario (5 GB); the Low column is the closest match. 5/20/50 GB were bracketing assumptions, not measurements. Traces are expected to be ~100% of checkout/payment/delivery traces (~9k over the run) plus sampled browse/cart traffic, so X-Ray cost is well under the 1M-trace Expected line.
 
 <!-- prettier-ignore-start -->
 # 72-hour experiment cost estimate, eu-central-1 (Frankfurt)

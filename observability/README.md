@@ -8,9 +8,11 @@ Nothing outside Grafana watches Grafana itself, so a Grafana outage is not alert
 
 Customer-facing 5xx alerts cover add-to-cart, remove-from-cart, checkout, and order status. The 5xx numerator is HTTP 500–599. Allocation conflicts return HTTP 409 and are only on the informational per-SKU-category alerts, so they do not contribute to the 5xx rules. Informational severity must not page: it routes to a no-page contact point. The `experiment-budget` entry is an AWS Budgets alert (`retain_on_teardown: true`), not a Grafana rule, and teardown leaves it in place. See [teardown-checklist.md](teardown-checklist.md).
 
-Faults run in scheduled windows (for example about 10 minutes at high probability every few hours). Each window logs start and end markers, so alerts are expected to enter Alerting (Firing) during those windows. Thresholds remain initial values to tune.
+The required metric set for each service is request rate, error rate, p50/p95/p99 per operation, and an outbound-call metric for calls to other services and to its own database. The dashboard shows that set as one row per service. Shop has a rule per operation. Inventory, payment, and delivery also have a service-level 5xx rule and a service-level p99 rule. Every service has one outbound error-rate rule (`operation: outbound`). Service-wide rates use `operation: all`.
 
-The spike schedule and the alert each spike is expected to fire are in [expected-alarms.md](expected-alarms.md).
+Faults are paired with spikes and run for 15–20 minutes. Each window logs start and end markers. Rules may enter Alerting (Firing) during those windows, and each outcome is scored against the hypotheses in [expected-alarms.md](expected-alarms.md). Thresholds remain initial values to tune.
+
+Missing datapoints are not a breach for ratio (5xx and outbound error) and latency (p99) rules. A stopped load generator or a quiet period produces no datapoints, and that silence must not count as a failure. Count-based rules for database timeouts and payments stuck also treat missing data as not breaching. Those alerts set `missing_data: not_breaching`, which the generator maps to `noDataState: OK`. `request-rate-zero` is the exception (`missing_data: breaching`, `noDataState: Alerting`): no customer-facing shop requests for 10 minutes means a dead load generator or broken routing, so a silent system is not mistaken for a healthy one. A known runner restart, or the warm-up before the first spike, is an expected false positive to record when scoring.
 
 ## Fields
 
@@ -24,7 +26,7 @@ The spike schedule and the alert each spike is expected to fire are in [expected
 | `threshold`          | Initial trip point. Numeric caps for the load generator, and the budget amount, live in their own configuration.                                                                                                  |
 | `window`             | Total evaluation window. Maps to the Grafana evaluation range and to `for`.                                                                                                                                       |
 | `min_request_count`  | Optional. The rule cannot enter Alerting unless the window has at least this many requests. The generator adds a math or threshold expression on the request-count query and combines it with the rule condition. |
-| `missing_data`       | Optional. `not_breaching` sets `noDataState` to OK. `breaching` sets `noDataState` to Alerting.                                                                                                                   |
+| `missing_data`       | Optional. `not_breaching` keeps a window with no datapoints from entering Alerting and sets `noDataState` to OK. `breaching` sets `noDataState` to Alerting.                                                      |
 | `severity`           | `critical`, `warning`, or `informational`. Copied to the `severity` label. Informational routes to a no-page contact point.                                                                                       |
 | `why`                | One sentence, copied into the summary annotation.                                                                                                                                                                 |
 | `retain_on_teardown` | Optional. Set only on the budget alert.                                                                                                                                                                           |
@@ -57,15 +59,16 @@ Grafana alert state history lives inside the Grafana task and is lost on restart
 
 Keep this file. The same catalog could target another Grafana data source set. ADOT (or another OpenTelemetry collector) would export to Cloud Monitoring, Cloud Logging, and Cloud Trace, and Grafana would use those data sources instead of CloudWatch and X-Ray. A generator produces Grafana alert-rule provisioning files either way.
 
-| Catalog                  | GCP                                                                                                                     |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `signal: metric`         | Cloud Monitoring alerting policy, threshold condition                                                                   |
-| `signal: log`            | Log-based metric, then an alerting policy                                                                               |
-| `signal: trace`          | Cloud Trace span metric, then an alerting policy                                                                        |
-| `scope`                  | Labels such as `service` and `operation`                                                                                |
-| `group_by: sku_category` | Group-by on that label. Severity stays informational                                                                    |
-| p99                      | `ALIGN_PERCENTILE_99` over the same window                                                                              |
-| 5xx ratio                | A ratio condition whose numerator is HTTP 500–599. HTTP 409 stays on the allocation-conflict policy                     |
-| `severity`               | Notification channel. Informational policies do not page                                                                |
-| `why`                    | Policy documentation                                                                                                    |
-| `experiment-budget`      | Cloud Billing budget at the same percentage of the configured experiment budget, retained after the workload is deleted |
+| Catalog                  | GCP                                                                                                                               |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `signal: metric`         | Cloud Monitoring alerting policy, threshold condition                                                                             |
+| `signal: log`            | Log-based metric, then an alerting policy                                                                                         |
+| `signal: trace`          | Cloud Trace span metric, then an alerting policy                                                                                  |
+| `scope`                  | Labels such as `service` and `operation`                                                                                          |
+| `group_by: sku_category` | Group-by on that label. Severity stays informational                                                                              |
+| p99                      | `ALIGN_PERCENTILE_99` over the same window                                                                                        |
+| 5xx ratio                | A ratio condition whose numerator is HTTP 500–599. HTTP 409 stays on the allocation-conflict policy                               |
+| `missing_data`           | `evaluationMissingData`: `EVALUATION_MISSING_DATA_INACTIVE` for `not_breaching`, `EVALUATION_MISSING_DATA_ACTIVE` for `breaching` |
+| `severity`               | Notification channel. Informational policies do not page                                                                          |
+| `why`                    | Policy documentation                                                                                                              |
+| `experiment-budget`      | Cloud Billing budget at the same percentage of the configured experiment budget, retained after the workload is deleted           |
