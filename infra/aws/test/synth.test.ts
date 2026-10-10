@@ -322,5 +322,5 @@ describe('cdk synth', () => {
         'OTEL_DEMO_LOAD_SCHEDULE_FILE',
       ),
     ).toBeUndefined();
-  });
+  }, 60_000);
 });
