@@ -75,6 +75,10 @@ export function mockAws(
     'cloudformation',
     'budgets',
     'serviceQuotas',
+    'secretsManager',
+    'kms',
+    'elasticache',
+    'opensearch',
   ];
   const calls = {} as MockAws['calls'];
   const clients = {} as TeardownClients;

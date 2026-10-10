@@ -120,10 +120,35 @@ describe('export abort', () => {
       },
       cloudformation: stackHandler(),
     });
-    const { result } = await teardown(aws, { skipExport: true });
+    const { result, resultsRoot } = await teardown(aws, {
+      skipExport: true,
+      acknowledgeNoExport: true,
+    });
     expect(result.report).toMatch(/skipped by --skip-export/);
+    expect(result.report).toMatch(/EXPORT_MISSING/);
+    expect(existsSync(join(resultsRoot, 'run-test', 'EXPORT_MISSING'))).toBe(true);
+    expect(existsSync(join(resultsRoot, 'run-test', 'EXPORT_OK'))).toBe(false);
     expect(commandNames(aws.calls.logs)).not.toContain('DescribeQueryDefinitionsCommand');
     expect(commandNames(aws.calls.cloudformation)).toContain('DeleteStackCommand');
+  });
+
+  it('refuses --skip-export unless --i-understand-no-export is also set', async () => {
+    const aws = mockAws({ cloudformation: stackHandler() });
+    const { result, resultsRoot } = await teardown(aws, { skipExport: true });
+    expect(result.exitCode).toBe(1);
+    expect(result.report).toMatch(/--i-understand-no-export/);
+    expect(result.report).toMatch(/Nothing was destroyed/);
+    expect(commandNames(aws.calls.cloudformation)).not.toContain('DeleteStackCommand');
+    expect(existsSync(join(resultsRoot, 'run-test', 'EXPORT_MISSING'))).toBe(false);
+    expect(existsSync(join(resultsRoot, 'run-test', 'EXPORT_OK'))).toBe(false);
+  });
+
+  it('refuses --i-understand-no-export without --skip-export', async () => {
+    const aws = mockAws({ cloudformation: stackHandler() });
+    const { result } = await teardown(aws, { acknowledgeNoExport: true });
+    expect(result.exitCode).toBe(1);
+    expect(result.report).toMatch(/must both be set/);
+    expect(commandNames(aws.calls.cloudformation)).not.toContain('DeleteStackCommand');
   });
 
   it('writes EXPORT_MISSING and continues cleanup when the stacks are already gone', async () => {
@@ -194,6 +219,12 @@ describe('export abort', () => {
     const { result } = await teardown(aws, { resultsRoot });
     expect(result.exitCode).toBe(0);
     expect(result.report).toMatch(/existing EXPORT_OK/);
-    expect(aws.calls.cloudwatch).toHaveLength(0);
+    expect(commandNames(aws.calls.cloudwatch)).not.toContain('DescribeAlarmHistoryCommand');
+    const alarmReads = aws.calls.cloudwatch.filter((call) => call.name === 'DescribeAlarmsCommand');
+    expect(alarmReads.length).toBeGreaterThan(0);
+    for (const call of alarmReads) {
+      expect(call.input.AlarmNames).toBeUndefined();
+    }
+    expect(result.report).toMatch(/WARN: region scan could not list cloudwatch-alarm/);
   });
 });

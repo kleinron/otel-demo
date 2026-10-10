@@ -51,6 +51,47 @@ export async function writeExportMissing(directory: string, reason: string): Pro
   await writeFile(join(directory, 'EXPORT_MISSING'), body, 'utf8');
 }
 
+/**
+ * Archive the rehearsal log group only. A pre-deploy account has no alarms or
+ * saved queries, so this does not use the full experiment export.
+ */
+export async function exportRehearsal(input: {
+  logs: SdkClient;
+  directory: string;
+  runId: string;
+  logGroup: string;
+}): Promise<ExportResult> {
+  const files: string[] = [];
+  try {
+    await writeJson(
+      input.directory,
+      'run-record.json',
+      {
+        runId: input.runId,
+        loadProfile: 'rehearsal',
+        note: 'Pre-deploy rehearsal. This is not an experiment archive.',
+        logGroup: input.logGroup,
+      },
+      files,
+    );
+    const events = await fetchLogEvents(input.logs, input.logGroup, 0, Date.now());
+    await writeJson(
+      input.directory,
+      join('logs', `${safeStem(input.logGroup)}.json`),
+      events,
+      files,
+    );
+    await writeFile(
+      join(input.directory, 'EXPORT_OK'),
+      `${JSON.stringify({ runId: input.runId, files }, null, 2)}\n`,
+      'utf8',
+    );
+    return { ok: true, directory: input.directory, files };
+  } catch (error) {
+    return { ok: false, directory: input.directory, files, reason: safeError(error) };
+  }
+}
+
 export async function exportRun(input: {
   clients: TeardownClients;
   config: SafetyConfig;

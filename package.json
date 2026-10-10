@@ -20,6 +20,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "teardown": "tsx scripts/teardown.ts",
+    "teardown:rehearsal": "tsx scripts/teardown-rehearsal.ts",
     "deploy:check": "tsx scripts/deploy-check.ts"
   },
   "devDependencies": {

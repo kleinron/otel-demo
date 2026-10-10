@@ -7,9 +7,13 @@ import { ECRClient } from '@aws-sdk/client-ecr';
 import { ECSClient } from '@aws-sdk/client-ecs';
 import { ElasticLoadBalancingClient } from '@aws-sdk/client-elastic-load-balancing';
 import { ElasticLoadBalancingV2Client } from '@aws-sdk/client-elastic-load-balancing-v2';
+import { ElastiCacheClient } from '@aws-sdk/client-elasticache';
+import { KMSClient } from '@aws-sdk/client-kms';
+import { OpenSearchClient } from '@aws-sdk/client-opensearch';
 import { RDSClient } from '@aws-sdk/client-rds';
 import { ResourceGroupsTaggingAPIClient } from '@aws-sdk/client-resource-groups-tagging-api';
 import { S3Client } from '@aws-sdk/client-s3';
+import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { ServiceQuotasClient } from '@aws-sdk/client-service-quotas';
 import { STSClient } from '@aws-sdk/client-sts';
 import type { SdkClient, SdkCommand, TeardownClients } from './types.js';
@@ -40,5 +44,9 @@ export function createClients(region: string, budgetsRegion: string): TeardownCl
     cloudformation: asSdk(new CloudFormationClient(settings)),
     budgets: asSdk(new BudgetsClient({ region: budgetsRegion, customUserAgent: USER_AGENT })),
     serviceQuotas: asSdk(new ServiceQuotasClient(settings)),
+    secretsManager: asSdk(new SecretsManagerClient(settings)),
+    kms: asSdk(new KMSClient(settings)),
+    elasticache: asSdk(new ElastiCacheClient(settings)),
+    opensearch: asSdk(new OpenSearchClient(settings)),
   };
 }
