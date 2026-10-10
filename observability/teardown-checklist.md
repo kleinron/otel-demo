@@ -30,12 +30,14 @@ Export all of the following for the run window:
 - [ ] Run records: load profile, start and end, fault-injection state (database timeouts and payment delays on or off), and the log events for the load generator and the four services.
 - [ ] Alarm history for every alarm generated from [alerts.yml](alerts.yml), plus the deployed threshold and state.
 - [ ] Saved CloudWatch Logs Insights queries (`describe-query-definitions`) and the result of each saved query for the run window.
+- [ ] A set of full checkout traces as JSON under `results/<run-id>/traces/`. Find them with X-Ray `GetTraceSummaries` and filter expressions, then fetch each trace with `BatchGetTraces`. Include successful checkouts, failed ones (`error=true`, and out-of-stock 409 flows), and fault-tagged ones (`fault.injected`). A checkout trace counts only if it contains spans from shop, inventory, payment, and delivery. If a hop is missing, the exported JSON states which hops were missing.
 
 Follow pagination on every list call until there is no continuation token.
 
 - [ ] A query that returns no rows is a successful empty result. Write the empty result file.
 - [ ] A non-zero API call, an access error, a partial write, or a missing file is a failed export.
 - [ ] If there are no saved Logs Insights queries to archive, the export has failed. Stop and create the saved queries before destroying anything.
+- [ ] The trace export is part of the `EXPORT_OK` gate. No traces exported means the export failed, unless the run recorded zero checkouts.
 - [ ] Write `results/<run-id>/EXPORT_OK` only after every export command has succeeded. The marker lists the files written.
 - [ ] If the export fails, do not write `EXPORT_OK`. Stop. Leave the stack up. Fix the export and repeat this step. `cdk destroy` is not allowed.
 
@@ -97,6 +99,8 @@ Verification is read-only. A resource counts as gone only after the list call ha
 ## Sanitizing exports
 
 `results/` is local. Before any of it is committed to this public repository, attached to a PR, or pasted into an issue, sanitize it.
+
+Trace JSON under `results/<run-id>/traces/` contains account ids, ARNs, and hostnames. Sanitize it before it goes into this public repository.
 
 Redact all of the following from every exported file:
 
