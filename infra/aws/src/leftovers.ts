@@ -1,5 +1,4 @@
 import { DeleteStackCommand } from '@aws-sdk/client-cloudformation';
-import { DeleteCertificateCommand } from '@aws-sdk/client-acm';
 import {
   DeleteNatGatewayCommand,
   DeleteNetworkInterfaceCommand,
@@ -70,7 +69,6 @@ const ORDER: ResourceKind[] = [
   'rds-automated-backup',
   'secret',
   'ssm-parameter',
-  'acm-certificate',
   'log-group',
   'ecr-repository',
   's3-bucket',
@@ -302,9 +300,6 @@ async function deleteResource(
       return;
     case 'ssm-parameter':
       await clients.ssm.send(new DeleteParameterCommand({ Name: resource.deleteRef }));
-      return;
-    case 'acm-certificate':
-      await clients.acm.send(new DeleteCertificateCommand({ CertificateArn: resource.deleteRef }));
       return;
     case 'log-group':
       await clients.logs.send(new DeleteLogGroupCommand({ logGroupName: resource.deleteRef }));

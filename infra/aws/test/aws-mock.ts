@@ -77,7 +77,6 @@ export function mockAws(
     'serviceQuotas',
     'secretsManager',
     'ssm',
-    'acm',
     'xray',
     'kms',
     'elasticache',

@@ -52,6 +52,8 @@ The stack in `src/cdk` uses:
 - The experiment tag once, on the app: `Tags.of(app).add('experiment', 'otel-demo')`.
 - No S3 buckets. A later bucket still needs `autoDeleteObjects: true`.
 
-Verify also lists security groups, running ECS tasks (including Grafana), Secrets Manager secrets, the SSM faults parameter, and the ACM certificate, and deletes any of those that remain. Deploy with `--region eu-central-1`. Synth does not call AWS.
+Verify also lists security groups (including the Grafana task group), running ECS tasks (including Grafana), Secrets Manager secrets (including the Grafana admin password), and the SSM faults parameter, and deletes any of those that remain. Deploy with `--region eu-central-1`. Synth does not call AWS.
+
+`npm run grafana:url` prints the Grafana task's current public address. The security group starts with no inbound rules; add your address on port 3000 after every deploy.
 
 Do not put account ids, ARNs, IP addresses, or credentials in this tree. Cost notes: [docs/cost-estimate.md](../../docs/cost-estimate.md).

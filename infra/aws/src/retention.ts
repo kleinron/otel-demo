@@ -20,7 +20,6 @@ const DELETABLE: Record<ResourceKind, boolean> = {
   'ecs-task': true,
   secret: true,
   'ssm-parameter': true,
-  'acm-certificate': true,
   'cloudformation-stack': true,
   's3-bucket': true,
   other: false,

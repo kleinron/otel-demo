@@ -53,13 +53,19 @@ npm run synth -w @otel-demo/infra-aws
 
 An operator deploy, from `infra/aws`, is `npx cdk deploy --region eu-central-1`. Build each service image and push the `demo` tag to its ECR repository before that. Synth does not build images.
 
-Grafana is HTTPS on a public load balancer whose security group is created with no inbound rules. After every deploy, including a redeploy, add your address on port 443 to the group in the `GrafanaAlbSecurityGroupId` output. The group does not keep that rule across a redeploy. Grafana being unreachable is not data loss: metrics, logs, and traces stay in CloudWatch and X-Ray, and alert state lines stay in `/otel-demo/alerts`.
+Grafana is plain HTTP on port 3000. The task is in a public subnet and has a public address. Its security group is created with no inbound rules. After every deploy, including a redeploy, add your address on port 3000 to the group in the `GrafanaSecurityGroupId` output. The group does not keep that rule across a redeploy. The task address changes when the task restarts. With credentials in the environment:
 
-The hostname parameter defaults to `otel-demo.ronklein.co.il`. While the stack is still creating, copy the ACM DNS validation record from the pending certificate. The same name, type, and value are the outputs `GrafanaCertValidationRecordName`, `GrafanaCertValidationRecordType`, and `GrafanaCertValidationRecordValue` when the stack finishes. Add that record, and a record from `GrafanaHostname` to `GrafanaAlbDnsName`, by hand.
+```bash
+npm run grafana:url
+```
+
+That prints the current address as `http://<address>:3000`. Plain HTTP is acceptable for this throwaway demo. The generated admin password lives only in Secrets Manager (`otel-demo/grafana-admin`) and is not used anywhere else. Do not copy it into the repo, a log, or a pull request. Anonymous access and sign-up are off. Grafana being unreachable is not data loss: metrics, logs, and traces stay in CloudWatch and X-Ray, and alert state lines stay in `/otel-demo/alerts`.
+
+Shop traffic from the load generator still uses the internal load balancer. That balancer has no public address.
 
 Database backups are off: retention is 0 days, deletion protection is off, and destroy does not take a final snapshot.
 
-Cost follows the no-NAT ARM column in the SRE estimate, [docs/cost-estimate.md](docs/cost-estimate.md). The stack adds no NAT gateway and no CloudWatch alarms. Backup retention 0 keeps the backup line at $0. The databases are PostgreSQL, and Secrets Manager holds four database passwords plus the Grafana admin password; the tables price one secret and a MySQL row.
+Cost follows the no-NAT ARM column in the SRE estimate, [docs/cost-estimate.md](docs/cost-estimate.md). The stack adds no NAT gateway, no public Grafana load balancer, and no CloudWatch alarms. Grafana's public IPv4 is the task address. Backup retention 0 keeps the backup line at $0. The databases are PostgreSQL, and Secrets Manager holds four database passwords plus the Grafana admin password; the tables price one secret and a MySQL row.
 
 ## Requirements
 

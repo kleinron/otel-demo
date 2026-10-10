@@ -33,7 +33,7 @@ An inventory reserve that cannot be filled is a business outcome: HTTP 409, out 
 
 Process configuration comes from environment variables. Provider-specific code is allowed only under `infra/<provider>/`. `infra/aws/` holds the CDK demo stack, the experiment tag, the teardown command, and the deploy guard. Application packages do not import a cloud SDK.
 
-The demo runs in eu-central-1. Tasks are small public Fargate tasks so they can reach ECR and CloudWatch without a NAT gateway. Databases sit on isolated subnets. Shop traffic from the load generator uses an internal load balancer. An ADOT sidecar sends OTLP to CloudWatch metrics, X-Ray, and CloudWatch Logs, and keeps checkout, payment, delivery, errors, slow traces, and fault-tagged traces while sampling browse and cart. Grafana is one more small task. Its HTTPS load balancer security group starts with no inbound rules. Alerts exist only as Grafana rules generated from `observability/alerts.yml`. Database backups are off.
+The demo runs in eu-central-1. Tasks are small public Fargate tasks so they can reach ECR and CloudWatch without a NAT gateway. Databases sit on isolated subnets. Shop traffic from the load generator uses an internal load balancer. An ADOT sidecar sends OTLP to CloudWatch metrics, X-Ray, and CloudWatch Logs, and keeps checkout, payment, delivery, errors, slow traces, and fault-tagged traces while sampling browse and cart. Grafana is one more small task, plain HTTP on port 3000, with a security group that starts with no inbound rules. Plain HTTP is acceptable for this throwaway demo. The admin password is only in Secrets Manager and is not used anywhere else. Alerts exist only as Grafana rules generated from `observability/alerts.yml`. Database backups are off.
 
 ## Telemetry
 

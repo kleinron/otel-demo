@@ -14,7 +14,6 @@
     }
   },
   "dependencies": {
-    "@aws-sdk/client-acm": "^3.901.0",
     "@aws-sdk/client-budgets": "^3.901.0",
     "@aws-sdk/client-cloudformation": "^3.901.0",
     "@aws-sdk/client-cloudwatch": "^3.901.0",

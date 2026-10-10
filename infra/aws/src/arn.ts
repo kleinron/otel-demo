@@ -92,10 +92,6 @@ function mapResource(
       : resource;
     return { kind: 'ssm-parameter', name, deleteRef: name };
   }
-  if (service === 'acm') {
-    const name = resource.replace(/^certificate\//, '');
-    return { kind: 'acm-certificate', name, deleteRef: arn };
-  }
   const slash = resource.includes('/') ? resource : resource;
   return { kind: 'other', name: `${service}/${slash}`, deleteRef: arn };
 }

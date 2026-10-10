@@ -13,6 +13,9 @@ export const SERVICE_PORTS: Record<ServiceName, number> = {
 
 export const LOADGEN_NAME = 'loadgen';
 export const GRAFANA_NAME = 'grafana';
+export const CLUSTER_NAME = 'otel-demo';
+export const GRAFANA_SERVICE_NAME = 'otel-demo-grafana';
+export const GRAFANA_PORT = 3000;
 
 export const FAULTS_PARAMETER_NAME = '/otel-demo/faults-enabled';
 export const ALERT_LOG_GROUP = '/otel-demo/alerts';

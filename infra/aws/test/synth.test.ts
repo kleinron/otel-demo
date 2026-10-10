@@ -105,12 +105,13 @@ describe('cdk synth', () => {
       expect(network.AwsvpcConfiguration?.AssignPublicIp).toBe('ENABLED');
     }
     const balancers = ofType(template, 'AWS::ElasticLoadBalancingV2::LoadBalancer');
-    const shop = balancers.find((balancer) => balancer.Properties?.Name === 'otel-demo-shop');
-    const grafana = balancers.find((balancer) => balancer.Properties?.Name === 'otel-demo-grafana');
-    expect(shop?.Properties?.Scheme).toBe('internal');
-    expect(grafana?.Properties?.Scheme).toBe('internet-facing');
+    expect(balancers).toHaveLength(1);
+    expect(balancers[0]?.Properties).toMatchObject({ Name: 'otel-demo-shop', Scheme: 'internal' });
+    const listeners = ofType(template, 'AWS::ElasticLoadBalancingV2::Listener');
+    expect(listeners).toHaveLength(1);
+    expect(listeners[0]?.Properties).toMatchObject({ Port: 80, Protocol: 'HTTP' });
     const grafanaGroupId = Object.entries(template.Resources).find(
-      ([, resource]) => resource.Properties?.GroupName === 'otel-demo-grafana-alb',
+      ([, resource]) => resource.Properties?.GroupName === 'otel-demo-grafana',
     )?.[0];
     expect(grafanaGroupId).toBeDefined();
     const grafanaGroup = template.Resources[grafanaGroupId ?? ''];
@@ -126,7 +127,7 @@ describe('cdk synth', () => {
     }
   });
 
-  it('limits task-role SSM access to the faults switch and publishes the DNS records to add by hand', () => {
+  it('limits task-role SSM access to the faults switch and keeps Grafana on plain HTTP', () => {
     const parameter = ofType(template, 'AWS::SSM::Parameter');
     expect(parameter).toHaveLength(1);
     expect(parameter[0]?.Properties).toMatchObject({
@@ -151,7 +152,9 @@ describe('cdk synth', () => {
       }
     }
     expect(ssmActions).toEqual(['ssm:GetParameter']);
-    expect(template.Parameters?.GrafanaDomainName?.Default).toBe('otel-demo.ronklein.co.il');
+    expect(template.Parameters?.GrafanaDomainName).toBeUndefined();
+    expect(template.Outputs?.GrafanaSecurityGroupId).toBeDefined();
+    expect(template.Outputs?.ShopAlbDnsName).toBeDefined();
     for (const name of [
       'GrafanaAlbDnsName',
       'GrafanaHostname',
@@ -160,12 +163,34 @@ describe('cdk synth', () => {
       'GrafanaCertValidationRecordType',
       'GrafanaCertValidationRecordValue',
     ]) {
-      expect(template.Outputs?.[name]).toBeDefined();
+      expect(template.Outputs?.[name]).toBeUndefined();
     }
-    const certificate = ofType(template, 'AWS::CertificateManager::Certificate');
-    expect(certificate).toHaveLength(1);
-    expect(certificate[0]?.Properties?.ValidationMethod).toBe('DNS');
-    expect(certificate[0]?.DeletionPolicy).toBe('Delete');
+    expect(ofType(template, 'AWS::CertificateManager::Certificate')).toEqual([]);
+    const grafanaTask = ofType(template, 'AWS::ECS::TaskDefinition').find(
+      (task) => task.Properties?.Family === 'otel-demo-grafana',
+    );
+    const containers = grafanaTask?.Properties?.ContainerDefinitions as {
+      Name?: string;
+      Environment?: { Name?: string; Value?: string }[];
+      Secrets?: { Name?: string }[];
+      PortMappings?: { ContainerPort?: number }[];
+    }[];
+    const grafana = containers.find((container) => container.Name === 'grafana');
+    expect(grafana?.PortMappings).toEqual([expect.objectContaining({ ContainerPort: 3000 })]);
+    expect(grafana?.Environment).toEqual(
+      expect.arrayContaining([
+        { Name: 'GF_SERVER_PROTOCOL', Value: 'http' },
+        { Name: 'GF_AUTH_ANONYMOUS_ENABLED', Value: 'false' },
+        { Name: 'GF_USERS_ALLOW_SIGN_UP', Value: 'false' },
+      ]),
+    );
+    expect(grafana?.Environment?.some((item) => item.Name === 'GF_SECURITY_ADMIN_PASSWORD')).toBe(
+      false,
+    );
+    expect(grafana?.Secrets?.map((item) => item.Name).sort()).toEqual([
+      'GF_SECURITY_ADMIN_PASSWORD',
+      'GF_SECURITY_ADMIN_USER',
+    ]);
     const tagged = Object.values(template.Resources).filter((resource) =>
       Array.isArray(resource.Properties?.Tags),
     );

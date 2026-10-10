@@ -1,4 +1,3 @@
-import { ACMClient } from '@aws-sdk/client-acm';
 import { BudgetsClient } from '@aws-sdk/client-budgets';
 import { CloudFormationClient } from '@aws-sdk/client-cloudformation';
 import { CloudWatchClient } from '@aws-sdk/client-cloudwatch';
@@ -49,7 +48,6 @@ export function createClients(region: string, budgetsRegion: string): TeardownCl
     serviceQuotas: asSdk(new ServiceQuotasClient(settings)),
     secretsManager: asSdk(new SecretsManagerClient(settings)),
     ssm: asSdk(new SSMClient(settings)),
-    acm: asSdk(new ACMClient(settings)),
     xray: asSdk(new XRayClient(settings)),
     kms: asSdk(new KMSClient(settings)),
     elasticache: asSdk(new ElastiCacheClient(settings)),

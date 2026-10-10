@@ -2,7 +2,7 @@ Prices fetched 2026-10-10 from the AWS Price List bulk JSON for eu-central-1; re
 
 The experiment keeps database backups off.
 
-The CDK app follows the no-NAT ARM column below. These tables are the SRE estimate. The stack uses PostgreSQL rather than the MySQL rows, sets backup retention to 0 (the backup line stays $0), creates no NAT gateway and no CloudWatch alarms, and stores five Secrets Manager secrets (four databases plus the Grafana admin password) where the tables price one.
+The CDK app follows the no-NAT ARM column below. These tables are the SRE estimate. The stack uses PostgreSQL rather than the MySQL rows, sets backup retention to 0 (the backup line stays $0), creates no NAT gateway and no CloudWatch alarms, and stores five Secrets Manager secrets (four databases plus the Grafana admin password) where the tables price one. Grafana has no public load balancer. The public IPv4 line for Grafana is the Fargate task address, not a listener. The shop load balancer is internal and has no public address.
 
 ## Revised expectation
 
@@ -52,7 +52,7 @@ Full matrix (no NAT / 1 NAT, ARM64):
 | CW standard alarms (not generated) | 0.10 $/alarm-mo | 0 | $0.0000 |
 | Grafana on Fargate (1 extra task, ARM) | 0.011357 $/task-hr (0.25vCPU+0.5GB) | 72 | $0.8177 |
 | Secrets Manager (1 secret) | 0.40 $/secret-mo | 0.0986 | $0.0394 |
-| Public IPv4 (Grafana listener, if public) | 0.005 $/IP-hr | 72 | $0.3600 |
+| Public IPv4 (Grafana task) | 0.005 $/IP-hr | 72 | $0.3600 |
 | CW GetMetricData (Grafana, ~30 rules/min) | 0.00001 $/metric | 129,600 | $1.2960 |
 | X-Ray traces stored | 0.000005 $/trace | 1,000,000 | $5.0000 |
 | X-Ray traces scanned/retrieved | 0.0000005 $/trace | 1,000,000 | $0.5000 |
@@ -83,7 +83,7 @@ Full matrix (no NAT / 1 NAT, ARM64):
 | CW standard alarms (not generated) | 0.10 $/alarm-mo | 0 | $0.0000 |
 | Grafana on Fargate (1 extra task, ARM) | 0.011357 $/task-hr (0.25vCPU+0.5GB) | 72 | $0.8177 |
 | Secrets Manager (1 secret) | 0.40 $/secret-mo | 0.0986 | $0.0394 |
-| Public IPv4 (Grafana listener, if public) | 0.005 $/IP-hr | 72 | $0.3600 |
+| Public IPv4 (Grafana task) | 0.005 $/IP-hr | 72 | $0.3600 |
 | CW GetMetricData (Grafana, ~30 rules/min) | 0.00001 $/metric | 129,600 | $1.2960 |
 | X-Ray traces stored | 0.000005 $/trace | 1,000,000 | $5.0000 |
 | X-Ray traces scanned/retrieved | 0.0000005 $/trace | 1,000,000 | $0.5000 |
@@ -114,7 +114,7 @@ Full matrix (no NAT / 1 NAT, ARM64):
 | CW standard alarms (not generated) | 0.10 $/alarm-mo | 0 | $0.0000 |
 | Grafana on Fargate (1 extra task, ARM) | 0.011357 $/task-hr (0.25vCPU+0.5GB) | 72 | $0.8177 |
 | Secrets Manager (1 secret) | 0.40 $/secret-mo | 0.0986 | $0.0394 |
-| Public IPv4 (Grafana listener, if public) | 0.005 $/IP-hr | 72 | $0.3600 |
+| Public IPv4 (Grafana task) | 0.005 $/IP-hr | 72 | $0.3600 |
 | CW GetMetricData (Grafana, ~30 rules/min) | 0.00001 $/metric | 129,600 | $1.2960 |
 | X-Ray traces stored | 0.000005 $/trace | 5,000,000 | $25.0000 |
 | X-Ray traces scanned/retrieved | 0.0000005 $/trace | 5,000,000 | $2.5000 |
@@ -143,7 +143,7 @@ Full matrix (no NAT / 1 NAT, ARM64):
 | CW standard alarms (not generated) | 0.10 $/alarm-mo | 0 | $0.0000 |
 | Grafana on Fargate (1 extra task, ARM) | 0.011357 $/task-hr (0.25vCPU+0.5GB) | 72 | $0.8177 |
 | Secrets Manager (1 secret) | 0.40 $/secret-mo | 0.0986 | $0.0394 |
-| Public IPv4 (Grafana listener, if public) | 0.005 $/IP-hr | 72 | $0.3600 |
+| Public IPv4 (Grafana task) | 0.005 $/IP-hr | 72 | $0.3600 |
 | CW GetMetricData (Grafana, ~30 rules/min) | 0.00001 $/metric | 129,600 | $1.2960 |
 | X-Ray traces stored | 0.000005 $/trace | 1,000,000 | $5.0000 |
 | X-Ray traces scanned/retrieved | 0.0000005 $/trace | 1,000,000 | $0.5000 |
@@ -170,9 +170,9 @@ Top 3 in High + NAT: CW Logs ingestion $31.50; X-Ray traces stored $25.00; CW cu
 - Fargate 0.25 vCPU / 0.5 GB per task, 5 workload tasks plus 1 Grafana task running the full 72 h, 20 GB default ephemeral storage (no extra charge; only >20 GB is billed at $0.000132/GB-h). No Savings Plans / Spot. Grafana uses the same ARM task-hour price: 0.25 x 0.03725 + 0.5 x 0.00409 = $0.0113575, shown as 0.011357. 72 h x $0.0113575 = $0.8177.
 - ADOT collector runs as a sidecar inside the same task and shares its 0.25 vCPU / 0.5 GB: no separate charge. (Sidecar contention may force larger task sizes; not priced.)
 - RDS MySQL priced; PostgreSQL db.t4g.micro would differ slightly (not fetched). gp3 20 GB: baseline IOPS/throughput are included at this size so no PIOPS/throughput charge. Automated backup storage up to 100% of provisioned storage is free, so 1-day retention costs $0 (the bulk file only lists the overage rate of $0.103/GB-mo; the free allocation rule is from RDS docs, not verified in the bulk JSON). DBs not publicly accessible (no public IPv4). RDS Performance Insights/Database Insights, Enhanced Monitoring off.
-- ALB: 1 LCU average per hour (assumption; real LCU depends on connections/bytes/rules). ALB spans 2 AZs, so 2 public IPv4.
-- Public IPv4 charged at $0.005/h per in-use address. No-NAT case: 5 workload Fargate tasks have public IPs. NAT case: those tasks are private, plus 1 NAT EIP. The Grafana listener adds one more public IPv4 (72 h x $0.005 = $0.36) when it is public. That line is included in every total in this file. Drop $0.36 if the listener is private. It is not inside the "5 Fargate tasks" row.
-- A full 730 h month of the fixed items named in the budget check (no NAT address count) is about $321, written as roughly $320: 6 ARM tasks x 730 h x $0.0113575 = $49.75; 4 x db.t4g.micro x 730 h x $0.019 = $55.48; 80 GB gp3 x $0.137 = $10.96; ALB 730 h x ($0.027 + $0.008) = $25.55; 8 public IPv4 (2 ALB + 5 workload tasks + Grafana) x 730 h x $0.005 = $29.20; one secret $0.40; 500 metrics x $0.30 = $150. Sum $321.34. Grafana GetMetricData over that month at 30 rules/minute is 30 x 60 x 730 x $0.00001 = $13.14.
+- ALB: 1 LCU average per hour (assumption; real LCU depends on connections/bytes/rules). The stack's only load balancer is the internal shop balancer, so it has no public address. The "2 public IPv4" figure below was for a public balancer spanning 2 AZs and does not apply to this stack.
+- Public IPv4 charged at $0.005/h per in-use address. No-NAT case: 5 workload Fargate tasks have public IPs. NAT case: those tasks are private, plus 1 NAT EIP. Grafana adds one more public IPv4 on the task itself (72 h x $0.005 = $0.36). That line is included in every total in this file. There is no public Grafana load balancer. The task address is not inside the "5 Fargate tasks" row, and it changes when the task restarts.
+- A full 730 h month of the fixed items named in the budget check (no NAT address count) is about $321, written as roughly $320: 6 ARM tasks x 730 h x $0.0113575 = $49.75; 4 x db.t4g.micro x 730 h x $0.019 = $55.48; 80 GB gp3 x $0.137 = $10.96; ALB 730 h x ($0.027 + $0.008) = $25.55; 8 public IPv4 (2 ALB + 5 workload tasks + Grafana) x 730 h x $0.005 = $29.20; one secret $0.40; 500 metrics x $0.30 = $150. Sum $321.34. This stack has no public ALB address, so the two ALB addresses in that month sum are not created; Grafana's address is the task. Grafana GetMetricData over that month at 30 rules/minute is 30 x 60 x 730 x $0.00001 = $13.14.
 - NAT gateway data processed = log GB + 5 GB (ECR image pulls ~2 GB, traces/metrics ~3 GB). Assumed; no VPC endpoints. Intra-region cross-AZ transfer ignored. NAT per-GB uses the standard NAT price.
 - CloudWatch Logs: Standard class, custom log ingestion $0.63/GB; storage billed at ingested size, prorated 72 h (compression ignored, conservative). Logs Insights 100 GB scanned at $0.0063/GB.
 - Metrics: 500 custom metric series for the whole 72 h at $0.30 (first 10k tier), prorated hourly. PutMetricData requests: ASSUMED 1 call per task per 10 s (129,600 calls) at $0.01/1000.
@@ -181,7 +181,7 @@ Top 3 in High + NAT: CW Logs ingestion $31.50; X-Ray traces stored $25.00; CW cu
 - X-Ray: "recorded" = stored ($5/M), "scanned" = scanned/retrieved ($0.50/M) once per trace.
 - ECR 2 GB, S3 1 GB (requests ignored), data transfer out 10 GB at the first-tier $0.09/GB.
 - AWS Budgets: 2 budgets, within free (first 2 action-enabled budget-days free, then $0.10/budget-day; plain budgets $0).
-- Free tiers (CW 5 GB log ingestion/10 metrics/10 alarms, X-Ray 100k traces/1M scans, data-transfer 100 GB/month) NOT deducted: account-dependent, so totals are conservative. The 10-alarm free tier does not apply here because no CloudWatch alarms are generated. Taxes, Support plan, KMS, further secrets beyond the one priced above, Secrets Manager API calls, Route 53, certificates (ACM public free) not included.
+- Free tiers (CW 5 GB log ingestion/10 metrics/10 alarms, X-Ray 100k traces/1M scans, data-transfer 100 GB/month) NOT deducted: account-dependent, so totals are conservative. The 10-alarm free tier does not apply here because no CloudWatch alarms are generated. Taxes, Support plan, KMS, further secrets beyond the one priced above, Secrets Manager API calls, and Route 53 are not included. The stack creates no ACM certificate.
 - Scenario definitions: Low = 5 GB logs/1M traces; Expected = 20 GB/1M; High = 50 GB/5M.
 
 ## Price sources (all fetched 2026-10-10, Asia/Jerusalem; publicationDate of each file in brackets)

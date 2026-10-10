@@ -17,7 +17,6 @@ export const RESOURCE_KINDS = [
   'ecs-task',
   'secret',
   'ssm-parameter',
-  'acm-certificate',
   'cloudformation-stack',
   's3-bucket',
   'other',
@@ -70,7 +69,6 @@ export interface TeardownClients {
   serviceQuotas: SdkClient;
   secretsManager: SdkClient;
   ssm: SdkClient;
-  acm: SdkClient;
   xray: SdkClient;
   kms: SdkClient;
   elasticache: SdkClient;

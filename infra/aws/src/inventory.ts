@@ -33,7 +33,6 @@ import { GetResourcesCommand } from '@aws-sdk/client-resource-groups-tagging-api
 import { GetBucketLocationCommand, ListBucketsCommand } from '@aws-sdk/client-s3';
 import { ListSecretsCommand } from '@aws-sdk/client-secrets-manager';
 import { DescribeParametersCommand } from '@aws-sdk/client-ssm';
-import { ListCertificatesCommand, ListTagsForCertificateCommand } from '@aws-sdk/client-acm';
 import { resourceFromArn } from './arn.js';
 import { collectPages } from './paging.js';
 import {
@@ -69,7 +68,6 @@ export async function listExperimentResources(input: {
     addSecurityGroups(input.clients, input.region, found),
     addSecrets(input.clients, input.region, found),
     addParameters(input.clients, input.region, found),
-    addCertificates(input.clients, input.region, found),
     addStacks(input.clients, input.region, found),
     addBuckets(input.clients, found),
     addBudgets(input.clients, input.accountId, found, budgetNames),
@@ -714,51 +712,6 @@ async function addParameters(
     }
     consider(found, { kind: 'ssm-parameter', name, deleteRef: name, region });
   }
-}
-
-async function addCertificates(
-  clients: TeardownClients,
-  region: string,
-  found: Map<string, ExperimentResource>,
-): Promise<void> {
-  const certificates = await collectPages(
-    clients.acm,
-    (token) => new ListCertificatesCommand({ NextToken: token, MaxItems: 100 }),
-    (page) => ({
-      items: asArray(page.CertificateSummaryList),
-      token: asString(page.NextToken),
-    }),
-  );
-  for (const item of certificates) {
-    const record = asRecord(item);
-    const arn = asString(record.CertificateArn);
-    const domain = asString(record.DomainName);
-    const id = arn?.split('/').pop();
-    if (!arn || !id) {
-      continue;
-    }
-    const tags = await certificateTags(clients, arn);
-    const tagged = hasExperimentTag(tags);
-    const owned = tagged || nameMatchesExperiment(domain) || nameMatchesExperiment(id);
-    if (!owned) {
-      continue;
-    }
-    add(found, {
-      kind: 'acm-certificate',
-      name: id,
-      deleteRef: arn,
-      region,
-      tagged,
-      owned: true,
-    });
-  }
-}
-
-async function certificateTags(clients: TeardownClients, arn: string): Promise<unknown> {
-  const page = asRecord(
-    await clients.acm.send(new ListTagsForCertificateCommand({ CertificateArn: arn })),
-  );
-  return page.Tags;
 }
 
 async function addStacks(

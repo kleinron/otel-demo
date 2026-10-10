@@ -1,14 +1,6 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  CfnOutput,
-  CfnParameter,
-  Duration,
-  RemovalPolicy,
-  Stack,
-  type StackProps,
-} from 'aws-cdk-lib';
-import * as acm from 'aws-cdk-lib/aws-certificatemanager';
+import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
@@ -19,7 +11,6 @@ import * as rds from 'aws-cdk-lib/aws-rds';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as servicediscovery from 'aws-cdk-lib/aws-servicediscovery';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
-import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
 import { adotConfigYaml } from './collector.js';
 import { provisioningChunks, provisioningWriterScript } from '../grafana/bundle.js';
@@ -36,8 +27,11 @@ import {
   ADOT_LOG_GROUP,
   ALERT_LOG_GROUP,
   allInterfacesHost,
+  CLUSTER_NAME,
   FAULTS_PARAMETER_NAME,
   GRAFANA_LOG_GROUP,
+  GRAFANA_PORT,
+  GRAFANA_SERVICE_NAME,
   LOADGEN_NAME,
   SERVICE_PORTS,
   SERVICES,
@@ -59,14 +53,6 @@ export class DemoStack extends Stack {
   public constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    const domain = new CfnParameter(this, 'GrafanaDomainName', {
-      type: 'String',
-      default: 'otel-demo.ronklein.co.il',
-      description:
-        'Grafana hostname. Ron creates the ACM validation record and the hostname record by hand.',
-      allowedPattern: '^[a-z0-9.-]+$',
-    });
-
     const vpc = new ec2.Vpc(this, 'Vpc', {
       vpcName: 'otel-demo',
       maxAzs: 2,
@@ -82,7 +68,7 @@ export class DemoStack extends Stack {
       vpc,
     });
     const cluster = new ecs.Cluster(this, 'Cluster', {
-      clusterName: 'otel-demo',
+      clusterName: CLUSTER_NAME,
       vpc,
       containerInsightsV2: ecs.ContainerInsights.DISABLED,
     });
@@ -147,13 +133,6 @@ export class DemoStack extends Stack {
       'Internal shop load balancer. Inbound only from the load generator.',
     );
     shopAlbSg.addIngressRule(loadgenSg, ec2.Port.tcp(80), 'loadgen to shop');
-    const grafanaAlbSg = namedGroup(
-      this,
-      vpc,
-      'GrafanaAlb',
-      'otel-demo-grafana-alb',
-      'Grafana load balancer. No inbound rules. Ron adds his address on 443 after deploy.',
-    );
     for (const name of SERVICES) {
       groups.set(
         name,
@@ -181,10 +160,9 @@ export class DemoStack extends Stack {
       this,
       vpc,
       'GrafanaTask',
-      'otel-demo-grafana',
-      'Grafana task. Inbound only from its load balancer.',
+      GRAFANA_SERVICE_NAME,
+      'Grafana task. No inbound rules. Add an address on port 3000 after deploy.',
     );
-    grafanaTaskSg.addIngressRule(grafanaAlbSg, ec2.Port.tcp(3000), 'Grafana load balancer');
 
     const repositories = new Map<string, ecr.Repository>();
     const serviceLogs = new Map<string, logs.LogGroup>();
@@ -299,17 +277,10 @@ export class DemoStack extends Stack {
       },
     });
 
-    this.grafana(
-      cluster,
-      executionRole,
-      grafanaTaskSg,
-      grafanaAlbSg,
-      grafanaLogs,
-      alertLogs,
-      [...serviceLogs.values(), adotLogs],
-      vpc,
-      domain,
-    );
+    this.grafana(cluster, executionRole, grafanaTaskSg, grafanaLogs, alertLogs, [
+      ...serviceLogs.values(),
+      adotLogs,
+    ]);
 
     const queryGroups = [...serviceLogs.values(), alertLogs, grafanaLogs];
     savedQuery(this, 'TraceLines', TRACE_QUERY_NAME, TRACE_QUERY, queryGroups);
@@ -319,14 +290,10 @@ export class DemoStack extends Stack {
       description: 'Internal shop load balancer. No public address.',
       value: shopAlb.loadBalancerDnsName,
     });
-    new CfnOutput(this, 'GrafanaHostname', {
-      description: 'Create a DNS record from this hostname to GrafanaAlbDnsName by hand.',
-      value: domain.valueAsString,
-    });
-    new CfnOutput(this, 'GrafanaAlbSecurityGroupId', {
+    new CfnOutput(this, 'GrafanaSecurityGroupId', {
       description:
-        'No inbound rules. Add your address on 443 after every deploy. Grafana being unreachable is not data loss.',
-      value: grafanaAlbSg.securityGroupId,
+        'No inbound rules. Add your address on port 3000 after every deploy. Grafana being unreachable is not data loss.',
+      value: grafanaTaskSg.securityGroupId,
     });
   }
 
@@ -395,12 +362,9 @@ export class DemoStack extends Stack {
     cluster: ecs.Cluster,
     executionRole: iam.IRole,
     taskSg: ec2.SecurityGroup,
-    albSg: ec2.SecurityGroup,
     grafanaLogs: logs.LogGroup,
     alertLogs: logs.LogGroup,
     serviceLogs: logs.ILogGroup[],
-    vpc: ec2.IVpc,
-    domain: CfnParameter,
   ): void {
     const admin = new secretsmanager.Secret(this, 'GrafanaAdmin', {
       secretName: 'otel-demo/grafana-admin',
@@ -457,37 +421,8 @@ export class DemoStack extends Stack {
       }),
     );
 
-    const certificate = new acm.Certificate(this, 'GrafanaCert', {
-      domainName: domain.valueAsString,
-      validation: acm.CertificateValidation.fromDns(),
-    });
-    certificate.applyRemovalPolicy(RemovalPolicy.DESTROY);
-    const alb = new elbv2.ApplicationLoadBalancer(this, 'GrafanaAlb', {
-      vpc,
-      internetFacing: true,
-      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
-      securityGroup: albSg,
-      loadBalancerName: 'otel-demo-grafana',
-    });
-    const targets = new elbv2.ApplicationTargetGroup(this, 'GrafanaTargets', {
-      vpc,
-      port: 3000,
-      protocol: elbv2.ApplicationProtocol.HTTP,
-      targetType: elbv2.TargetType.IP,
-      targetGroupName: 'otel-demo-grafana',
-      healthCheck: { path: '/api/health', healthyHttpCodes: '200' },
-      deregistrationDelay: Duration.seconds(10),
-    });
-    alb.addListener('Https', {
-      port: 443,
-      protocol: elbv2.ApplicationProtocol.HTTPS,
-      certificates: [certificate],
-      defaultTargetGroups: [targets],
-      open: false,
-    });
-
     const task = new ecs.FargateTaskDefinition(this, 'GrafanaTask', {
-      family: 'otel-demo-grafana',
+      family: GRAFANA_SERVICE_NAME,
       cpu: TASK_CPU,
       memoryLimitMiB: TASK_MEMORY,
       runtimePlatform: {
@@ -519,8 +454,8 @@ export class DemoStack extends Stack {
       image: ecs.ContainerImage.fromRegistry(GRAFANA_IMAGE),
       essential: true,
       environment: {
-        GF_SERVER_HTTP_PORT: '3000',
-        GF_SERVER_ROOT_URL: `https://${domain.valueAsString}`,
+        GF_SERVER_PROTOCOL: 'http',
+        GF_SERVER_HTTP_PORT: String(GRAFANA_PORT),
         GF_USERS_ALLOW_SIGN_UP: 'false',
         GF_AUTH_ANONYMOUS_ENABLED: 'false',
         GF_LOG_LEVEL: 'info',
@@ -532,7 +467,7 @@ export class DemoStack extends Stack {
         GF_SECURITY_ADMIN_PASSWORD: ecs.Secret.fromSecretsManager(admin, 'password'),
       },
       logging: ecs.LogDrivers.awsLogs({ logGroup: grafanaLogs, streamPrefix: 'grafana' }),
-      portMappings: [{ containerPort: 3000 }],
+      portMappings: [{ containerPort: GRAFANA_PORT }],
     });
     grafana.addMountPoints({
       sourceVolume: 'provisioning',
@@ -550,8 +485,8 @@ export class DemoStack extends Stack {
       logging: ecs.LogDrivers.awsLogs({ logGroup: alertLogs, streamPrefix: 'state' }),
     });
 
-    const service = new ecs.FargateService(this, 'GrafanaService', {
-      serviceName: 'otel-demo-grafana',
+    new ecs.FargateService(this, 'GrafanaService', {
+      serviceName: GRAFANA_SERVICE_NAME,
       cluster,
       taskDefinition: task,
       desiredCount: 1,
@@ -562,47 +497,6 @@ export class DemoStack extends Stack {
       minHealthyPercent: 0,
       maxHealthyPercent: 100,
       circuitBreaker: { rollback: true },
-    });
-    targets.addTarget(
-      service.loadBalancerTarget({ containerName: 'grafana', containerPort: 3000 }),
-    );
-
-    const records = new cr.AwsCustomResource(this, 'GrafanaCertRecords', {
-      onCreate: {
-        service: 'ACM',
-        action: 'describeCertificate',
-        parameters: { CertificateArn: certificate.certificateArn },
-        physicalResourceId: cr.PhysicalResourceId.of('otel-demo-grafana-cert-records'),
-      },
-      onUpdate: {
-        service: 'ACM',
-        action: 'describeCertificate',
-        parameters: { CertificateArn: certificate.certificateArn },
-        physicalResourceId: cr.PhysicalResourceId.of('otel-demo-grafana-cert-records'),
-      },
-      policy: cr.AwsCustomResourcePolicy.fromSdkCalls({
-        resources: [certificate.certificateArn],
-      }),
-      installLatestAwsSdk: false,
-    });
-    records.node.addDependency(certificate);
-    new CfnOutput(this, 'GrafanaAlbDnsName', {
-      description: 'Point the Grafana hostname at this name with a DNS record Ron adds by hand.',
-      value: alb.loadBalancerDnsName,
-    });
-    new CfnOutput(this, 'GrafanaCertValidationRecordName', {
-      description:
-        'ACM DNS validation record name. The same name is on the pending certificate while the stack is creating.',
-      value: records.getResponseField('Certificate.DomainValidationOptions.0.ResourceRecord.Name'),
-    });
-    new CfnOutput(this, 'GrafanaCertValidationRecordType', {
-      description: 'ACM DNS validation record type.',
-      value: records.getResponseField('Certificate.DomainValidationOptions.0.ResourceRecord.Type'),
-    });
-    new CfnOutput(this, 'GrafanaCertValidationRecordValue', {
-      description:
-        'ACM DNS validation record value. Ron adds this record by hand. It is also shown on the pending certificate.',
-      value: records.getResponseField('Certificate.DomainValidationOptions.0.ResourceRecord.Value'),
     });
   }
 }
