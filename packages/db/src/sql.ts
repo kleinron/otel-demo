@@ -9,6 +9,11 @@ export interface SqlCall {
 export interface SqlOptions {
   timeoutMs?: number;
   onCall?: (event: SqlCall) => void;
+  /**
+   * Runs before the driver call and outside the statement timeout, so an
+   * injected timeout can last longer than the driver's own limit.
+   */
+  beforeQuery?: (operation: string) => Promise<void>;
 }
 
 export interface SqlRows<T> {
@@ -85,6 +90,9 @@ export function createSql(executor: QueryExecutor, options: SqlOptions = {}): Sq
       ): Promise<SqlRows<T>> {
         const started = performance.now();
         try {
+          if (options.beforeQuery) {
+            await options.beforeQuery(operation);
+          }
           const result = await withTimeout(inner.query<T>(text, params), timeoutMs, operation);
           options.onCall?.({
             operation,

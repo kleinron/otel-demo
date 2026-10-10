@@ -26,7 +26,7 @@ services/shop          cart, checkout, order status
 services/inventory     catalog, warehouse stock, reserve and release
 services/payment       dummy charges: authorized, captured, declined, unknown
 services/delivery      handoff, packaging, shipped
-loadgen                placeholder for later scenarios
+loadgen                open-loop shop load, fixed arrival rate, UTC spikes
 infra/aws              experiment tag, teardown, deploy guard, SSM fault-switch reader
 docs                   architecture, telemetry, and teardown runbook
 docker-compose.yml     local Postgres and the four services
@@ -60,7 +60,7 @@ npm run lint
 npm run format:check
 ```
 
-`npm test` runs Vitest for the telemetry package, service behavior, the seed rebuild, and a checkout trace that spans all four services. The trace test also drops `traceparent` on each hop and expects the trace to split. Tests use in-process Postgres, so they do not need Docker. `npm run build` compiles the workspaces with TypeScript project references.
+`npm test` runs Vitest for the telemetry package, service behavior, the seed rebuild, a checkout trace that spans all four services, and the load generator schedule. The trace test also drops `traceparent` on each hop and expects the trace to split. Tests use in-process Postgres, so they do not need Docker. `npm run build` compiles the workspaces with TypeScript project references.
 
 ## Local databases
 
@@ -94,6 +94,15 @@ Health checks:
 | delivery  | `http://localhost:3004/health` |
 
 Point traces and metrics at a collector with `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4318`). The exporter is OTLP/HTTP. Logs are JSON on stdout and include `trace_id`, `span_id`, an X-Ray-format trace id, `service`, and `orderId` when the request has one.
+
+## Load
+
+`loadgen/` plays browse, cart, checkout, and order-status flows against shop at a fixed arrival rate. The plan is `loadgen/schedule.json`. See [loadgen/README.md](loadgen/README.md).
+
+```bash
+npm run build
+SHOP_URL=http://localhost:3001 npm run start -w @otel-demo/loadgen
+```
 
 ## Secrets
 

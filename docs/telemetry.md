@@ -95,6 +95,8 @@ A successful read of `off` logs `faults off by operator` once for that transitio
 
 `loadFaultInjectionConfig` is unchanged: it still returns an empty list unless `OTEL_DEMO_FAULTS_ENABLED` is set, and it does not apply faults. The running services use `loadFaultSchedule` plus the polled switch.
 
+`OTEL_DEMO_LOAD_SCHEDULE_FILE` points at the load generator schedule (`loadgen/schedule.json`). When it is set, that file replaces the single fault window: each spike's fault block becomes its own UTC window, the first spike of the experiment stays a baseline with no fault, and the kill switch is still required. `LOADGEN_START_UTC` and `LOADGEN_SEED` override the file for both the generator and the services. A database `timeout` fault fails the SQL call before the driver and records `outcome=timeout`. `ping` is not faulted. Window start and end are logged in UTC. A process that starts inside a window does not log that start again.
+
 ## Service ports
 
 | Service   | Default port |
