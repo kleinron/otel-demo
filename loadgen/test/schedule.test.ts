@@ -4,11 +4,13 @@ import { describe, expect, it } from 'vitest';
 import { customerAt, SEED_CUSTOMER_COUNT } from '../../services/shop/src/customers.ts';
 import { CATALOG, stockOnHand } from '../../services/inventory/src/catalog.ts';
 import {
+  applyRuntimeOverrides,
   baseCurvePerSecond,
   buildPlan,
   customerId,
   faultAt,
   mixSeed,
+  loadPlanFromEnv,
   parseLoadSchedule,
   SECONDS_PER_DAY,
   spikeAt,
@@ -138,6 +140,29 @@ describe('checked-in schedule', () => {
     const nextDay = spikeAt(shifted, Date.parse('2026-10-14T12:00:00.000Z'));
     expect(nextDay?.size).toBe('saturation');
     expect(nextDay?.fault).toBeDefined();
+  });
+
+  it('uses the schedule start unless LOADGEN_START_UTC overrides it', () => {
+    const fileStart = schedule.experiment.start;
+    expect(applyRuntimeOverrides(schedule, {}).experiment.start).toBe(fileStart);
+    expect(applyRuntimeOverrides(schedule, { LOADGEN_START_UTC: '   ' }).experiment.start).toBe(
+      fileStart,
+    );
+    const pinned = '2030-01-02T03:04:05.000Z';
+    expect(applyRuntimeOverrides(schedule, { LOADGEN_START_UTC: pinned }).experiment.start).toBe(
+      pinned,
+    );
+    const fromFile = loadPlanFromEnv({
+      OTEL_DEMO_LOAD_SCHEDULE_FILE: fileURLToPath(new URL('../schedule.json', import.meta.url)),
+    });
+    expect(fromFile?.schedule.experiment.start).toBe(fileStart);
+    expect(fromFile?.startMs).toBe(Date.parse(fileStart));
+    const overridden = loadPlanFromEnv({
+      OTEL_DEMO_LOAD_SCHEDULE_FILE: fileURLToPath(new URL('../schedule.json', import.meta.url)),
+      LOADGEN_START_UTC: pinned,
+    });
+    expect(overridden?.schedule.experiment.start).toBe(pinned);
+    expect(overridden?.startMs).toBe(Date.parse(pinned));
   });
 });
 

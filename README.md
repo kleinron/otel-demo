@@ -54,7 +54,22 @@ CI runs `cdk synth`. Nothing in this repository creates AWS resources.
 npm run synth -w @otel-demo/infra-aws
 ```
 
-An operator deploy, from `infra/aws`, is `npx cdk deploy --region eu-central-1`. Build each service image and push the `demo` tag to its ECR repository before that. Synth does not build images.
+An operator deploy, from `infra/aws`, exports the experiment start and then deploys:
+
+```bash
+export LOADGEN_START_UTC=<experiment start>
+npx cdk deploy --region eu-central-1
+```
+
+Any `cdk deploy` must export `LOADGEN_START_UTC` to that run's experiment start (ISO-8601 UTC). CDK writes the value onto every service task and the load generator task, so the deploy keeps the experiment start. When the variable is unset, those tasks use `experiment.start` from `loadgen/schedule.json`. The start is a runtime value. Leave it out of the stack source.
+
+Build the service image and push the `demo` tag to each ECR repository (`otel-demo/shop`, `otel-demo/inventory`, `otel-demo/payment`, `otel-demo/delivery`, and `otel-demo/loadgen`) before that deploy. Synth does not build images.
+
+```bash
+npm run image:build
+```
+
+That script runs `docker build --platform linux/arm64 -f infra/aws/docker/service.Dockerfile`. Images must be built with `--platform linux/arm64`. Fargate tasks are ARM. The Dockerfile rejects any other architecture. An x86 build fails at task start with `exec format error` and the ECS deployment rolls back. The image includes `loadgen/schedule.json` at `/app/loadgen/schedule.json`. Service tasks set `OTEL_DEMO_LOAD_SCHEDULE_FILE` to that path so scheduled fault windows can fire inside the services.
 
 After the first deploy, seed reference data before any checkout traffic. Payment and delivery create their tables when those tasks start. Shop customers and inventory stock are loaded by one-off Fargate tasks that use the deployed task definitions, replace the app command with the seed program, and then stop:
 
@@ -64,7 +79,13 @@ npm run seed:aws
 
 That is a required step after the first deploy. The seed program drops the shop and inventory tables and loads the reference data again. Run it again only when that data should be rebuilt. The `demo` image has to include `services/shop/dist/seed-main.js` and `services/inventory/dist/seed-main.js`, so push that image before seeding. The task entrypoint still runs the fault switch, which builds `DATABASE_URL` from the task's database settings, then starts the seed program. Region defaults to `eu-central-1` (`AWS_REGION` or `EXPERIMENT_REGION` override it). The command names the cluster `otel-demo` and the services `otel-demo-shop` and `otel-demo-inventory`.
 
-The load generator service is deployed with desired count 0, so `cdk deploy` leaves it stopped. Start it for a run and stop it when the run is over:
+The load generator service is created with desired count 0. A later `cdk deploy` rolls a generator that is already running, and that roll starts a new task. After any `cdk deploy`, run this first when the runner should stay stopped:
+
+```bash
+npm run loadgen:stop
+```
+
+Start it for a run and stop it when the run is over:
 
 ```bash
 npm run loadgen:start
@@ -72,6 +93,8 @@ npm run loadgen:stop
 ```
 
 Those set the `otel-demo-loadgen` desired count to 1 and 0.
+
+Scheduled faults fire only when the SSM parameter `/otel-demo/faults-enabled` is `on`. `off` is the emergency stop. The stack creates the parameter as `off`.
 
 Grafana is plain HTTP on port 3000. The task is in a public subnet and has a public address. Its security group is created with no inbound rules. After every deploy, including a redeploy, add your address on port 3000 to the group in the `GrafanaSecurityGroupId` output. The group does not keep that rule across a redeploy. The task address changes when the task restarts. With credentials in the environment:
 
