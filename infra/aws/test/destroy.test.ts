@@ -32,6 +32,7 @@ describe('stack destroy', () => {
       env: exportEnv(),
       region: 'eu-central-1',
       skipExport: true,
+      acknowledgeNoExport: true,
       cdkAppPresent: true,
       now: new Date('2026-10-10T00:00:00Z'),
       clients: aws.clients,

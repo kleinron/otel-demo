@@ -21,6 +21,7 @@ The AWS budget name is `otel-demo-experiment`. That string also matches the name
 From the repo root, with credentials in the environment (never in the repo):
 
 ```bash
+npm run teardown:rehearsal
 npm run teardown -- --dry-run
 npm run teardown -- --region eu-central-1
 npm run teardown -- --run-id run-2026-10-10
@@ -28,7 +29,9 @@ npm run teardown -- --run-id run-2026-10-10
 
 `--region` defaults to `eu-central-1`. Precedence is `--region`, then `EXPERIMENT_REGION`, then `AWS_REGION`, then `eu-central-1`.
 
-`--dry-run` checks credentials and prints the stacks and leftovers it would remove. It does not export, does not call `cdk destroy`, and does not delete.
+Run `npm run teardown:rehearsal` before the first full deploy. It creates one tagged S3 bucket and one tagged CloudWatch log group, then runs the real teardown path against them: export, destroy, leftover deletion, and verify. The command exits non-zero if either resource remains. That rehearsal is not an experiment archive. Its `results/rehearsal-<token>/` directory only proves the delete path works on an otherwise empty account.
+
+`--dry-run` checks credentials and prints the full plan. It does not export, does not write `EXPORT_MISSING`, does not call `cdk destroy`, and does not delete. The plan lists every resource that would be deleted, one per line. A resource matched only by the whole-token `otel-demo` name is marked `name-only match, no tag`. Read that list before a real run. A tagged resource is marked `experiment tag`.
 
 ## What it does
 
@@ -37,6 +40,7 @@ npm run teardown -- --run-id run-2026-10-10
 3. Destroys experiment CloudFormation stacks. `CDKToolkit` is never destroyed. Until `infra/aws/cdk.json` exists, this is `DeleteStack` for stacks whose names belong to the experiment. When the CDK app lands, the same step runs `npx cdk destroy` for those stack names only.
 4. Deletes leftovers by the experiment tag and by name: manual RDS snapshots, automated snapshots, retained automated backups, cluster snapshots, CloudWatch log groups, ECR repositories, S3 buckets in this region (including versions and delete markers), available ENIs, Elastic IPs, NAT gateways, load balancers, ECS services and clusters, and stacks that are still present. A resource whose owner is unclear is left in place.
 5. Verifies. The process exits non-zero if any experiment-tagged resource remains, or if any of these still exist by experiment name: RDS instances and snapshots, log groups, NAT gateways, load balancers, ECR repositories, ECS clusters, CloudFormation stacks, S3 buckets. The report lists each remainder. A clean account prints `VERIFY OK: nothing remains.`
+6. After that tagged and named check, scans the region for billable resource kinds regardless of tag or name. Every finding is printed as `WARN`. The scan does not change the exit code. Kinds: VPC endpoints, Secrets Manager secrets, KMS customer keys (AWS-managed keys are skipped), CloudWatch alarms and dashboards, running ECS tasks and services, EC2 instances, EBS volumes, Elastic IPs, NAT gateways, load balancers, RDS instances, clusters, and snapshots, ElastiCache, and OpenSearch. The Budgets alert `otel-demo-experiment` stays ignored. A different resource that happens to use that name, such as a dashboard, is still a warning. A list call that fails is also a `WARN` and does not fail the command by itself.
 
 The budget check for step 5 is read from `us-east-1` (`BUDGETS_REGION` overrides that). A regional resource list that does not show the budget is not evidence that it was deleted.
 
@@ -52,7 +56,7 @@ The budget check for step 5 is read from `us-east-1` (`BUDGETS_REGION` overrides
 Default behavior is to abort. `cdk destroy` does not start, and the process exits non-zero.
 
 - No saved Logs Insights queries, a failed API call, a missing alarm, a missing log group, or a partial write: no `EXPORT_OK`. Fix the export and run the command again.
-- `--skip-export` is the only flag that continues while the stacks still exist. Use it only when the records are already archived somewhere else.
+- Continuing while the stacks still exist requires both `--skip-export` and `--i-understand-no-export`. Either flag alone exits non-zero and destroys nothing. When both are set, the command writes `results/<run-id>/EXPORT_MISSING` and then destroys. That marker is not a successful export. Use the pair only when the records are already archived somewhere else.
 - If the experiment stacks are already gone and `EXPORT_OK` is not on disk, the command writes `results/<run-id>/EXPORT_MISSING` and continues leftover cleanup so NAT gateways and RDS do not keep billing. That marker is not a successful export.
 
 Re-running with the same `--run-id` (or `EXPERIMENT_RUN_ID`) reuses `EXPORT_OK` when every file it lists is still on disk and non-empty.
@@ -65,6 +69,22 @@ The command checks credentials before export, destroy, leftover deletion, and ve
 - Put fresh credentials in the environment. Do not copy the account id, caller ARN, or keys into the repo, the PR, or `results/`.
 - Run the same command again with the same `--run-id` and `--region`. Completed export is kept. Stack delete and leftover delete are safe to repeat. Not-found errors are treated as already gone.
 - If verify still prints a remainder, run it once more after the in-progress delete finishes. NAT gateways and RDS instances can outlive the first call.
+
+## Before the first full deploy
+
+```bash
+npm run teardown:rehearsal
+```
+
+This is the step to run before the first full deploy. It needs the same credentials as teardown and writes under `results/`. It fails if the tagged bucket or log group is still present after the real delete path. Do not treat that directory as the archive of a 72-hour run.
+
+The future CDK app must destroy cleanly. Apply all of the following in that stack, or `cdk destroy` will stop on a protected database, a retained log group, a non-empty repository, or a non-empty bucket:
+
+- RDS instances and clusters: `removalPolicy: RemovalPolicy.DESTROY`, `deletionProtection: false`, and the skip-final-snapshot equivalent so destroy does not leave a snapshot behind.
+- CloudWatch log groups: 7-day retention and `removalPolicy: RemovalPolicy.DESTROY`.
+- ECR repositories: `emptyOnDelete: true` (the same behavior as `autoDeleteImages` on constructs that still use that property).
+- S3 buckets: `autoDeleteObjects: true`.
+- One app-level tag so every construct inherits it: `Tags.of(app).add('experiment', 'otel-demo')`.
 
 ## Deploy guard
 

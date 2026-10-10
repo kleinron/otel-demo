@@ -1,4 +1,5 @@
 import { listExperimentResources } from './inventory.js';
+import { scanRegion } from './region-scan.js';
 import { isLeftover, isRetainedBudget } from './retention.js';
 import { RETAINED_BUDGET_NAME } from './tags.js';
 import type { ExperimentResource, TeardownClients } from './types.js';
@@ -26,11 +27,12 @@ export async function verifyAccount(input: {
   const retained =
     inventory.budgetNames.includes(RETAINED_BUDGET_NAME) ||
     inventory.resources.some(isRetainedBudget);
+  const scan = await scanRegion(input.clients);
   return {
     ok: leftovers.length === 0,
     leftovers,
     retainedBudget: retained ? 'present' : 'absent',
-    lines: formatVerifyLines(leftovers, retained),
+    lines: [...formatVerifyLines(leftovers, retained), ...scan.lines],
   };
 }
 

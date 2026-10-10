@@ -55,8 +55,14 @@ describe('verify', () => {
 
     expect(report.ok).toBe(true);
     expect(report.leftovers).toEqual([]);
-    expect(report.lines.join('\n')).toMatch(/VERIFY OK: nothing remains/);
-    expect(report.lines.join('\n')).not.toContain(account);
+    const text = report.lines.join('\n');
+    expect(text).toMatch(/VERIFY OK: nothing remains/);
+    expect(text).toMatch(/WARN: rds-instance other-db/);
+    expect(text).toMatch(/does not change the exit code/);
+    expect(text.indexOf('VERIFY OK')).toBeLessThan(text.indexOf('WARN:'));
+    expect(text).not.toMatch(/other-project/);
+    expect(text).not.toMatch(/CDKToolkit/);
+    expect(text).not.toContain(account);
     expect(commandNames(aws.calls.s3)).toEqual(['ListBucketsCommand']);
     for (const name of [
       'GetResourcesCommand',
@@ -221,7 +227,7 @@ describe('verify', () => {
       ].sort(),
     );
     expect(text).not.toContain('CDKToolkit');
-    expect(text).not.toContain('other-db');
+    expect(text).toMatch(/WARN: rds-instance other-db/);
     expect(text).not.toContain('other-project');
     expect(text).not.toContain('nat-gone');
     expect(text).not.toContain(account);
@@ -291,6 +297,7 @@ describe('verify', () => {
       env: exportEnv(),
       region: REGION,
       skipExport: true,
+      acknowledgeNoExport: true,
       now: new Date('2026-10-10T00:00:00Z'),
       clients: aws.clients,
       resultsRoot: mkdtempSync(join(tmpdir(), 'otel-demo-results-')),

@@ -80,9 +80,11 @@ describe('dry-run', () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.report).toMatch(/dry-run/);
-    expect(result.report).toMatch(/otel-demo-shop/);
+    expect(result.report).toMatch(/Dry-run plan: \d+ resource\(s\) would be deleted:/);
+    expect(result.report).toMatch(/rds-instance otel-demo-shop \(name-only match, no tag\)/);
+    expect(result.report).toMatch(/log-group \/otel-demo\/shop \(name-only match, no tag\)/);
+    expect(result.report).toMatch(/log-group \/aws\/lambda\/custom \(experiment tag\)/);
     expect(result.report).toMatch(/otel-demo-services/);
-    expect(result.report).toMatch(/\/aws\/lambda\/custom/);
     expect(result.report).not.toMatch(/CDKToolkit/);
     expect(mutations).toEqual([]);
     expect(result.report).not.toContain(account);

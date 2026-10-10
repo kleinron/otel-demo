@@ -63,6 +63,10 @@ export interface TeardownClients {
   cloudformation: SdkClient;
   budgets: SdkClient;
   serviceQuotas: SdkClient;
+  secretsManager: SdkClient;
+  kms: SdkClient;
+  elasticache: SdkClient;
+  opensearch: SdkClient;
 }
 
 export interface SleepOptions {

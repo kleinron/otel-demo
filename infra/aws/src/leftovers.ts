@@ -36,6 +36,7 @@ import { listExperimentResources } from './inventory.js';
 import { collectPages } from './paging.js';
 import { safeError } from './redact.js';
 import { deleteSkipReason } from './retention.js';
+import { nameMatchesExperiment } from './tags.js';
 import { asArray, asRecord, asString } from './text.js';
 import type { ExperimentResource, ResourceKind, SleepOptions, TeardownClients } from './types.js';
 import { waitUntil } from './wait.js';
@@ -103,7 +104,7 @@ export async function deleteLeftovers(input: {
       deleted: [],
       skipped,
       errors: [],
-      lines: dryRunLines(planned, skipped),
+      lines: dryRunLines(deletable, skipped),
     };
   }
 
@@ -131,17 +132,31 @@ export async function deleteLeftovers(input: {
   };
 }
 
-function dryRunLines(planned: string[], skipped: string[]): string[] {
-  const lines = [
-    planned.length === 0
-      ? 'Leftovers: dry-run found nothing to delete.'
-      : `Leftovers: dry-run would delete ${planned.length}: ${planned.join(', ')}.`,
-  ];
+function dryRunLines(planned: ExperimentResource[], skipped: string[]): string[] {
+  const lines: string[] = [];
+  if (planned.length === 0) {
+    lines.push('Dry-run plan: nothing would be deleted.');
+  } else {
+    lines.push(`Dry-run plan: ${planned.length} resource(s) would be deleted:`);
+    for (const resource of planned) {
+      lines.push(`- ${resourceLabel(resource)} (${matchNote(resource)})`);
+    }
+  }
   const retained = skipped.filter((line) => line.includes('allow-listed budget name'));
   if (retained.length > 0) {
     lines.push(`Leftovers: skipped ${retained.join(', ')}.`);
   }
   return lines;
+}
+
+function matchNote(resource: ExperimentResource): string {
+  if (resource.tagged) {
+    return 'experiment tag';
+  }
+  if (nameMatchesExperiment(resource.name)) {
+    return 'name-only match, no tag';
+  }
+  return 'no tag';
 }
 
 function realLines(deleted: string[], skipped: string[], errors: string[]): string[] {

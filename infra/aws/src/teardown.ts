@@ -2,7 +2,12 @@ import { join } from 'node:path';
 import { defaultRunId, loadConfig, type SafetyConfig } from './config.js';
 import { checkCredentials } from './credentials.js';
 import { defaultRunProcess, destroyStacks, type RunProcess } from './destroy.js';
-import { exportRun, readCompletedExport, writeExportMissing } from './export-run.js';
+import {
+  exportRehearsal,
+  exportRun,
+  readCompletedExport,
+  writeExportMissing,
+} from './export-run.js';
 import { listExperimentResources } from './inventory.js';
 import { deleteLeftovers } from './leftovers.js';
 import { redactText } from './redact.js';
@@ -20,6 +25,10 @@ export interface TeardownInput {
   region?: string;
   dryRun?: boolean;
   skipExport?: boolean;
+  /** Required together with skipExport. A real run writes EXPORT_MISSING and continues. */
+  acknowledgeNoExport?: boolean;
+  /** Pre-deploy rehearsal exports only this log group, then runs the normal delete path. */
+  rehearsal?: { logGroup: string };
   runId?: string;
   now?: Date;
   clients: TeardownClients;
@@ -46,6 +55,7 @@ export async function runTeardown(input: TeardownInput): Promise<TeardownResult>
   }
   const dryRun = input.dryRun ?? false;
   const skipExport = input.skipExport ?? false;
+  const acknowledgeNoExport = input.acknowledgeNoExport ?? false;
   const wait: SleepOptions = {
     sleep: input.sleep ?? delay,
     waitAttempts: input.waitAttempts ?? 30,
@@ -66,6 +76,11 @@ export async function runTeardown(input: TeardownInput): Promise<TeardownResult>
       'Export: skipped in dry-run. A real run exports first and aborts if that export fails.',
     );
   } else if (!(await ensureCredentials(input, config, now, lines))) {
+    return finish(1, lines);
+  } else if (skipExport !== acknowledgeNoExport) {
+    lines.push(
+      'Export: --skip-export and --i-understand-no-export must both be set to continue without an export. Nothing was destroyed.',
+    );
     return finish(1, lines);
   } else {
     accountId = opened.accountId;
@@ -143,8 +158,31 @@ async function settleExport(input: {
   lines: string[];
 }): Promise<'ok' | 'abort'> {
   const directory = join(input.config.resultsRoot, input.runId);
+  if (input.input.rehearsal) {
+    const exported = await exportRehearsal({
+      logs: input.input.clients.logs,
+      directory,
+      runId: input.runId,
+      logGroup: input.input.rehearsal.logGroup,
+    });
+    if (exported.ok) {
+      input.lines.push(
+        `Export: EXPORT_OK rehearsal (${exported.files.length} files) for ${input.runId}.`,
+      );
+      return 'ok';
+    }
+    input.lines.push(`Export: ABORT. ${exported.reason ?? 'Rehearsal export failed.'}`);
+    input.lines.push('cdk destroy was not started.');
+    return 'abort';
+  }
   if (input.skipExport) {
-    input.lines.push('Export: skipped by --skip-export.');
+    await writeExportMissing(
+      directory,
+      'Export skipped because --skip-export and --i-understand-no-export were both set. This is not a successful export.',
+    );
+    input.lines.push(
+      'Export: skipped by --skip-export and --i-understand-no-export. EXPORT_MISSING written. This is not a successful export.',
+    );
     return 'ok';
   }
   if (await readCompletedExport(directory)) {
