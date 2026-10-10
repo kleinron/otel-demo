@@ -31,7 +31,7 @@ An inventory reserve that cannot be filled is a business outcome: HTTP 409, out 
 
 ## Configuration
 
-Process configuration comes from environment variables. Provider-specific code is allowed only under `infra/<provider>/`. `infra/aws/` is a placeholder for later CDK. Application packages do not import a cloud SDK.
+Process configuration comes from environment variables. Provider-specific code is allowed only under `infra/<provider>/`. `infra/aws/` holds the experiment tag, the teardown command, and the deploy guard. It does not yet define the ECS or RDS stacks. Application packages do not import a cloud SDK.
 
 ## Telemetry
 

@@ -6,11 +6,11 @@ Do the steps in order. The export is the gate: if it fails while the records sti
 
 This checklist is safe to re-run with fresh credentials. It does not contain credentials, account ids, or key material. Do not add any of those while you follow it.
 
-The experiment tag key and value are defined in `infra/aws`. Read them from the stack that was deployed and use that pair. Do not guess a tag and delete from it.
+The experiment tag is the constant pair `experiment` = `otel-demo` in `infra/aws/src/tags.ts`. Use that pair. Do not guess a different tag and delete from it.
 
 `cdk destroy` targets the experiment stacks only. Leave the CDK bootstrap stack (`CDKToolkit`) and its asset bucket in place unless the account owner has explicitly asked to remove bootstrap.
 
-The AWS Budgets alert (`experiment-budget` in [alerts.yml](alerts.yml)) stays. Long-lived IAM access keys are not deleted by this checklist; the key owner deletes them after teardown is finished.
+The AWS Budgets alert (`experiment-budget` in [alerts.yml](alerts.yml), budget name `otel-demo-experiment`) stays. Teardown allow-lists that budget by name. Ron deletes the budget by hand after the experiment is fully finished. Long-lived IAM access keys are not deleted by this checklist; the key owner deletes them after teardown is finished.
 
 ## Credential check
 

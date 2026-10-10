@@ -6,6 +6,7 @@
     { "path": "services/inventory" },
     { "path": "services/payment" },
     { "path": "services/delivery" },
-    { "path": "loadgen" }
+    { "path": "loadgen" },
+    { "path": "infra/aws" }
   ]
 }
