@@ -1,7 +1,9 @@
 import { DeleteStackCommand } from '@aws-sdk/client-cloudformation';
+import { DeleteCertificateCommand } from '@aws-sdk/client-acm';
 import {
   DeleteNatGatewayCommand,
   DeleteNetworkInterfaceCommand,
+  DeleteSecurityGroupCommand,
   DescribeNatGatewaysCommand,
   ReleaseAddressCommand,
 } from '@aws-sdk/client-ec2';
@@ -10,6 +12,7 @@ import {
   DeleteClusterCommand,
   DeleteServiceCommand,
   ListServicesCommand,
+  StopTaskCommand,
 } from '@aws-sdk/client-ecs';
 import { DeleteLoadBalancerCommand as DeleteClassicLoadBalancerCommand } from '@aws-sdk/client-elastic-load-balancing';
 import {
@@ -31,6 +34,8 @@ import {
   ListMultipartUploadsCommand,
   ListObjectVersionsCommand,
 } from '@aws-sdk/client-s3';
+import { DeleteSecretCommand } from '@aws-sdk/client-secrets-manager';
+import { DeleteParameterCommand } from '@aws-sdk/client-ssm';
 import { isAlreadyGone } from './errors.js';
 import { listExperimentResources } from './inventory.js';
 import { collectPages } from './paging.js';
@@ -52,15 +57,20 @@ export interface DeleteReport {
 const ORDER: ResourceKind[] = [
   'load-balancer',
   'target-group',
+  'ecs-task',
   'ecs-service',
   'ecs-cluster',
   'nat-gateway',
   'network-interface',
+  'security-group',
   'elastic-ip',
   'rds-instance',
   'rds-snapshot',
   'rds-cluster-snapshot',
   'rds-automated-backup',
+  'secret',
+  'ssm-parameter',
+  'acm-certificate',
   'log-group',
   'ecr-repository',
   's3-bucket',
@@ -197,6 +207,16 @@ async function deleteResource(
         new DeleteTargetGroupCommand({ TargetGroupArn: resource.deleteRef }),
       );
       return;
+    case 'ecs-task': {
+      const slash = resource.deleteRef.indexOf('/');
+      const cluster = resource.deleteRef.slice(0, slash);
+      const task = resource.deleteRef.slice(slash + 1);
+      if (!cluster || !task) {
+        throw new Error('ecs task is missing a cluster name');
+      }
+      await clients.ecs.send(new StopTaskCommand({ cluster, task, reason: 'otel-demo teardown' }));
+      return;
+    }
     case 'ecs-service': {
       const [cluster, service] = resource.deleteRef.split('/');
       if (!cluster || !service) {
@@ -224,6 +244,9 @@ async function deleteResource(
       await clients.ec2.send(
         new DeleteNetworkInterfaceCommand({ NetworkInterfaceId: resource.deleteRef }),
       );
+      return;
+    case 'security-group':
+      await clients.ec2.send(new DeleteSecurityGroupCommand({ GroupId: resource.deleteRef }));
       return;
     case 'elastic-ip':
       await clients.ec2.send(new ReleaseAddressCommand({ AllocationId: resource.deleteRef }));
@@ -268,6 +291,20 @@ async function deleteResource(
           DBInstanceAutomatedBackupsArn: resource.deleteRef,
         }),
       );
+      return;
+    case 'secret':
+      await clients.secretsManager.send(
+        new DeleteSecretCommand({
+          SecretId: resource.deleteRef,
+          ForceDeleteWithoutRecovery: true,
+        }),
+      );
+      return;
+    case 'ssm-parameter':
+      await clients.ssm.send(new DeleteParameterCommand({ Name: resource.deleteRef }));
+      return;
+    case 'acm-certificate':
+      await clients.acm.send(new DeleteCertificateCommand({ CertificateArn: resource.deleteRef }));
       return;
     case 'log-group':
       await clients.logs.send(new DeleteLogGroupCommand({ logGroupName: resource.deleteRef }));

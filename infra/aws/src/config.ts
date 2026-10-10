@@ -9,6 +9,8 @@ export const DEFAULT_LOG_GROUPS = [
   `/otel-demo/payment`,
   `/otel-demo/delivery`,
   `/otel-demo/loadgen`,
+  `/otel-demo/alerts`,
+  `/otel-demo/grafana`,
 ] as const;
 
 const REGION_PATTERN = /^[a-z]{2}-[a-z]+-\d+$/;
@@ -25,6 +27,8 @@ export interface SafetyConfig {
   databaseTimeouts: 'on' | 'off';
   paymentDelays: 'on' | 'off';
   logGroups: string[];
+  /** Set to 0 only when the run recorded zero checkouts. */
+  checkoutCount?: number;
   dbEngine: string;
   dbInstanceClass: string;
   requiredDbInstances: number;
@@ -78,6 +82,17 @@ export function defaultRunId(now: Date): string {
   return `run-${now.toISOString().replace(/[:.]/g, '')}`;
 }
 
+function checkoutCount(value: string | undefined): number | undefined {
+  if (value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(value.trim());
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error('EXPERIMENT_CHECKOUT_COUNT must be a non-negative integer');
+  }
+  return parsed;
+}
+
 function onOff(value: string | undefined, name: string): 'on' | 'off' {
   if (value === undefined || value.trim() === '') {
     return 'off';
@@ -115,6 +130,7 @@ export function loadConfig(
     databaseTimeouts: onOff(env.EXPERIMENT_DATABASE_TIMEOUTS, 'EXPERIMENT_DATABASE_TIMEOUTS'),
     paymentDelays: onOff(env.EXPERIMENT_PAYMENT_DELAYS, 'EXPERIMENT_PAYMENT_DELAYS'),
     logGroups: logGroups.length > 0 ? logGroups : [...DEFAULT_LOG_GROUPS],
+    checkoutCount: checkoutCount(env.EXPERIMENT_CHECKOUT_COUNT),
     dbEngine: env.EXPERIMENT_DB_ENGINE?.trim() || 'postgres',
     dbInstanceClass: 'db.t4g.micro',
     requiredDbInstances: 4,

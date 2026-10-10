@@ -1,6 +1,6 @@
 # otel-demo
 
-Observability experiment: a small electronics store, fully instrumented, with cloud-specific code kept out of the services. This phase is the TypeScript skeleton and the shared telemetry package. Order, stock, payment, and delivery behavior are not implemented yet, and there is no AWS infrastructure.
+Observability experiment: a small electronics store, fully instrumented, with cloud-specific code kept out of the services. The services are still health endpoints. The AWS demo stack is CDK in `infra/aws`. Order, stock, payment, and delivery behavior are not implemented yet. This repository synthesizes and tests that stack. It does not deploy it.
 
 ## Architecture
 
@@ -25,7 +25,7 @@ services/inventory     stock (health endpoint only)
 services/payment       dummy payment provider (health endpoint only)
 services/delivery      delivery handoff (health endpoint only)
 loadgen                placeholder for later scenarios
-infra/aws              experiment tag, teardown, and deploy guard
+infra/aws              CDK demo stack, experiment tag, teardown, and deploy guard
 docs                   architecture, telemetry, and teardown runbook
 ```
 
@@ -33,7 +33,7 @@ docs                   architecture, telemetry, and teardown runbook
 
 ## AWS safety tooling
 
-No ECS or RDS stack is created from this repo yet. Before one is, the teardown and deploy guard in `infra/aws` are the gate. The only experiment tag is `experiment=otel-demo`. The Budgets alert `otel-demo-experiment` is allow-listed by name and is not deleted; Ron deletes it by hand after the experiment is fully finished.
+The demo stack and the teardown command both live in `infra/aws`. The only experiment tag is `experiment=otel-demo`. The Budgets alert `otel-demo-experiment` is allow-listed by name and is not deleted; Ron deletes it by hand after the experiment is fully finished. Database backups are off.
 
 ```bash
 npm run teardown -- --dry-run
@@ -41,7 +41,25 @@ npm run teardown -- --region eu-central-1
 EXPERIMENT_HARD_STOP_UTC=2026-10-17T00:00:00Z npm run deploy:check
 ```
 
-Runbook: [docs/teardown.md](docs/teardown.md). Tag contract: [infra/aws/README.md](infra/aws/README.md).
+Runbook: [docs/teardown.md](docs/teardown.md). Tag contract and stack: [infra/aws/README.md](infra/aws/README.md).
+
+## Run the demo stack
+
+CI runs `cdk synth`. Nothing in this repository creates AWS resources.
+
+```bash
+npm run synth -w @otel-demo/infra-aws
+```
+
+An operator deploy, from `infra/aws`, is `npx cdk deploy --region eu-central-1`. Build each service image and push the `demo` tag to its ECR repository before that. Synth does not build images.
+
+Grafana is HTTPS on a public load balancer whose security group is created with no inbound rules. After every deploy, including a redeploy, add your address on port 443 to the group in the `GrafanaAlbSecurityGroupId` output. The group does not keep that rule across a redeploy. Grafana being unreachable is not data loss: metrics, logs, and traces stay in CloudWatch and X-Ray, and alert state lines stay in `/otel-demo/alerts`.
+
+The hostname parameter defaults to `otel-demo.ronklein.co.il`. While the stack is still creating, copy the ACM DNS validation record from the pending certificate. The same name, type, and value are the outputs `GrafanaCertValidationRecordName`, `GrafanaCertValidationRecordType`, and `GrafanaCertValidationRecordValue` when the stack finishes. Add that record, and a record from `GrafanaHostname` to `GrafanaAlbDnsName`, by hand.
+
+Database backups are off: retention is 0 days, deletion protection is off, and destroy does not take a final snapshot.
+
+Cost follows the no-NAT ARM column in the SRE estimate, [docs/cost-estimate.md](docs/cost-estimate.md). The stack adds no NAT gateway and no CloudWatch alarms. Backup retention 0 keeps the backup line at $0. The databases are PostgreSQL, and Secrets Manager holds four database passwords plus the Grafana admin password; the tables price one secret and a MySQL row.
 
 ## Requirements
 

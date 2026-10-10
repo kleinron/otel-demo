@@ -175,7 +175,7 @@ describe('export abort', () => {
     const planted = fakeArn('rds', REGION, account, 'db:otel-demo-shop');
     const handlers = happyExportHandlers(planted);
     const aws = mockAws(
-      { cloudwatch: handlers.cloudwatch, logs: handlers.logs },
+      { cloudwatch: handlers.cloudwatch, logs: handlers.logs, xray: handlers.xray },
       { accountId: account },
     );
     const { result, resultsRoot } = await teardown(aws);
@@ -200,7 +200,73 @@ describe('export abort', () => {
     expect(alarm).toContain('[redacted-arn]');
     expect(alarm).not.toContain(account);
     expect(alarm).not.toContain(planted);
+    const trace = readFileSync(join(directory, 'traces', 'trace-checkout-1.json'), 'utf8');
+    expect(trace).toContain('[redacted-arn]');
+    expect(trace).not.toContain(account);
+    expect(trace).not.toContain(planted);
+    expect(trace).toContain('"missingHops": []');
+    expect(existsSync(join(directory, 'alerts', 'state-changes.json'))).toBe(true);
+    expect(existsSync(join(directory, 'alerts', 'rules', 'rules.yml'))).toBe(true);
     expect(redactText(['10', '1', '2', '3'].join('.'))).toBe('[redacted-ip]');
+  });
+
+  it('writes alarms/not-used.json when CloudWatch has no alarms', async () => {
+    const handlers = happyExportHandlers();
+    const aws = mockAws({
+      cloudwatch: {
+        DescribeAlarmsCommand: () => ({ MetricAlarms: [] }),
+      },
+      logs: handlers.logs,
+      xray: handlers.xray,
+    });
+    const { result, resultsRoot } = await teardown(aws);
+    const directory = join(resultsRoot, 'run-test');
+    expect(result.exitCode).toBe(0);
+    expect(existsSync(join(directory, 'alarms', 'not-used.json'))).toBe(true);
+    expect(existsSync(join(directory, 'alarms', 'shop-checkout-5xx-rate.json'))).toBe(false);
+    expect(existsSync(join(directory, 'alerts', 'state-changes.json'))).toBe(true);
+    expect(existsSync(join(directory, 'traces', 'trace-checkout-1.json'))).toBe(true);
+  });
+
+  it('aborts when no traces were exported and the checkout count is not zero', async () => {
+    const handlers = happyExportHandlers();
+    const aws = mockAws({
+      cloudwatch: handlers.cloudwatch,
+      logs: handlers.logs,
+      xray: {
+        GetTraceSummariesCommand: () => ({ TraceSummaries: [] }),
+      },
+      cloudformation: stackHandler(),
+    });
+    const { result, resultsRoot } = await teardown(aws);
+    expect(result.exitCode).toBe(1);
+    expect(result.report).toMatch(/No traces exported/);
+    expect(result.report).toMatch(/EXPERIMENT_CHECKOUT_COUNT=0/);
+    expect(result.report).toMatch(/cdk destroy was not started/);
+    expect(existsSync(join(resultsRoot, 'run-test', 'EXPORT_OK'))).toBe(false);
+    expect(commandNames(aws.calls.cloudformation)).not.toContain('DeleteStackCommand');
+  });
+
+  it('writes traces/none.json when the run recorded zero checkouts', async () => {
+    const handlers = happyExportHandlers();
+    const aws = mockAws({
+      cloudwatch: handlers.cloudwatch,
+      logs: handlers.logs,
+      xray: {
+        GetTraceSummariesCommand: () => ({ TraceSummaries: [] }),
+      },
+    });
+    const { result, resultsRoot } = await teardown(aws, {
+      env: exportEnv({ EXPERIMENT_CHECKOUT_COUNT: '0' }),
+    });
+    const directory = join(resultsRoot, 'run-test');
+    expect(result.exitCode).toBe(0);
+    const none = JSON.parse(readFileSync(join(directory, 'traces', 'none.json'), 'utf8')) as {
+      checkouts: number;
+      traces: unknown[];
+    };
+    expect(none).toEqual({ checkouts: 0, traces: [], missingHops: [] });
+    expect(existsSync(join(directory, 'EXPORT_OK'))).toBe(true);
   });
 
   it('reuses a complete EXPORT_OK instead of calling CloudWatch again', async () => {

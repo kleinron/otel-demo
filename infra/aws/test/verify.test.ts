@@ -80,6 +80,10 @@ describe('verify', () => {
       'ListStacksCommand',
       'ListBucketsCommand',
       'DescribeBudgetsCommand',
+      'DescribeSecurityGroupsCommand',
+      'ListSecretsCommand',
+      'DescribeParametersCommand',
+      'ListCertificatesCommand',
     ]) {
       const all = Object.values(aws.calls).flatMap(commandNames);
       expect(all).toContain(name);
@@ -312,5 +316,115 @@ describe('verify', () => {
     expect(result.report).toMatch(/VERIFY FAILED/);
     expect(result.report).toMatch(/rds-instance otel-demo-shop/);
     expect(result.report).not.toContain(account);
+  });
+
+  it('fails verify and deletes a Grafana security group, task, secret, parameter, and certificate', async () => {
+    const account = fakeAccount();
+    const certificateArn = fakeArn('acm', REGION, account, 'certificate/cert-grafana');
+    const clusterArn = fakeArn('ecs', REGION, account, 'cluster/otel-demo');
+    const taskArn = fakeArn('ecs', REGION, account, 'task/otel-demo/task-grafana');
+    const aws = mockAws(
+      {
+        ec2: {
+          DescribeSecurityGroupsCommand: () => ({
+            SecurityGroups: [
+              {
+                GroupId: 'sg-grafana',
+                GroupName: 'otel-demo-grafana-alb',
+                Tags: experimentTag(),
+              },
+            ],
+          }),
+        },
+        ecs: {
+          ListClustersCommand: () => ({ clusterArns: [clusterArn] }),
+          DescribeClustersCommand: () => ({
+            clusters: [{ clusterName: 'otel-demo', tags: experimentTag() }],
+          }),
+          ListTasksCommand: () => ({ taskArns: [taskArn] }),
+          DescribeTasksCommand: () => ({
+            tasks: [
+              {
+                taskArn,
+                group: 'service:otel-demo-grafana',
+                tags: experimentTag(),
+              },
+            ],
+          }),
+        },
+        secretsManager: {
+          ListSecretsCommand: () => ({
+            SecretList: [{ Name: 'otel-demo/grafana-admin', Tags: experimentTag() }],
+          }),
+        },
+        ssm: {
+          DescribeParametersCommand: () => ({
+            Parameters: [{ Name: '/otel-demo/faults-enabled' }],
+          }),
+        },
+        acm: {
+          ListCertificatesCommand: () => ({
+            CertificateSummaryList: [
+              { CertificateArn: certificateArn, DomainName: 'otel-demo.example.test' },
+            ],
+          }),
+          ListTagsForCertificateCommand: () => ({ Tags: experimentTag() }),
+        },
+      },
+      { accountId: account },
+    );
+
+    const report = await verifyAccount({
+      clients: aws.clients,
+      region: REGION,
+      accountId: account,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.leftovers.map((item) => `${item.kind} ${item.name}`)).toEqual(
+      expect.arrayContaining([
+        'security-group otel-demo-grafana-alb',
+        'ecs-task otel-demo-grafana',
+        'secret otel-demo/grafana-admin',
+        'ssm-parameter /otel-demo/faults-enabled',
+        'acm-certificate cert-grafana',
+      ]),
+    );
+
+    const result = await runTeardown({
+      env: exportEnv(),
+      region: REGION,
+      skipExport: true,
+      acknowledgeNoExport: true,
+      now: new Date('2026-10-10T00:00:00Z'),
+      clients: aws.clients,
+      resultsRoot: mkdtempSync(join(tmpdir(), 'otel-demo-results-')),
+      waitAttempts: 1,
+      waitIntervalMs: 0,
+      sleep: async () => undefined,
+      loadExpiration: async () => undefined,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.report).toMatch(/VERIFY FAILED/);
+    expect(aws.calls.ec2.some((call) => call.name === 'DeleteSecurityGroupCommand')).toBe(true);
+    expect(
+      aws.calls.ec2.find((call) => call.name === 'DeleteSecurityGroupCommand')?.input.GroupId,
+    ).toBe('sg-grafana');
+    const stop = aws.calls.ecs.find((call) => call.name === 'StopTaskCommand');
+    expect(stop?.input).toMatchObject({ cluster: 'otel-demo', task: 'task-grafana' });
+    expect(
+      aws.calls.secretsManager.find((call) => call.name === 'DeleteSecretCommand')?.input,
+    ).toMatchObject({
+      SecretId: 'otel-demo/grafana-admin',
+      ForceDeleteWithoutRecovery: true,
+    });
+    expect(
+      aws.calls.ssm.find((call) => call.name === 'DeleteParameterCommand')?.input,
+    ).toMatchObject({ Name: '/otel-demo/faults-enabled' });
+    expect(
+      aws.calls.acm.find((call) => call.name === 'DeleteCertificateCommand')?.input,
+    ).toMatchObject({ CertificateArn: certificateArn });
+    expect(result.report).not.toContain(account);
+    expect(result.report).not.toContain(certificateArn);
   });
 });

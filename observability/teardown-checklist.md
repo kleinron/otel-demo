@@ -92,6 +92,11 @@ Verification is read-only. A resource counts as gone only after the list call ha
   - [ ] Orphaned ENIs (`available` interfaces left behind by the experiment's tasks, NAT gateways, or load balancers). Delete an unattached experiment ENI if one is still present, then list again
   - [ ] S3 buckets (list is global; confirm the bucket region). Experiment-tagged buckets should be empty and removed, including versioned objects and delete markers
   - [ ] CloudFormation stacks. No experiment stack should remain, including `DELETE_FAILED`. `CDKToolkit` may remain
+  - [ ] Security groups, including the Grafana load balancer group
+  - [ ] Running ECS tasks, including the Grafana task
+  - [ ] Secrets Manager secrets (database passwords and the Grafana admin password)
+  - [ ] SSM parameters, including `/otel-demo/faults-enabled`
+  - [ ] ACM certificates for the Grafana hostname
 - [ ] Confirm the Budgets alert still exists. Budgets are queried from us-east-1 even though the workload is eu-central-1. A regional resource list that does not show the budget is not evidence that it was deleted.
 - [ ] Anything still present that belongs to the experiment: return to Step 3, then repeat this step.
 

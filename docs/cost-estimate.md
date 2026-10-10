@@ -2,6 +2,8 @@ Prices fetched 2026-10-10 from the AWS Price List bulk JSON for eu-central-1; re
 
 The experiment keeps database backups off.
 
+The CDK app follows the no-NAT ARM column below. These tables are the SRE estimate. The stack uses PostgreSQL rather than the MySQL rows, sets backup retention to 0 (the backup line stays $0), creates no NAT gateway and no CloudWatch alarms, and stores five Secrets Manager secrets (four databases plus the Grafana admin password) where the tables price one.
+
 ## Revised expectation
 
 Revised expectation: with the agreed load profile (~2.5 req/s avg) logs are expected at 1-2 GB, below the Low scenario (5 GB); the Low column is the closest match. 5/20/50 GB were bracketing assumptions, not measurements. Traces are expected to be ~100% of checkout/payment/delivery traces (~9k over the run) plus sampled browse/cart traffic, so X-Ray cost is well under the 1M-trace Expected line.

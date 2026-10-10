@@ -1,0 +1,7 @@
+{
+  "app": "npx tsx src/cdk/app.ts",
+  "output": "cdk.out",
+  "context": {
+    "@aws-cdk/core:stackRelativeExports": true
+  }
+}

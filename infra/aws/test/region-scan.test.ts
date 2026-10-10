@@ -197,8 +197,8 @@ describe('region scan', () => {
     const account = fakeAccount();
     const aws = mockAws(
       {
-        secretsManager: {
-          ListSecretsCommand: () => {
+        kms: {
+          ListKeysCommand: () => {
             throw new Error('access denied');
           },
         },
@@ -220,7 +220,7 @@ describe('region scan', () => {
     expect(report.ok).toBe(true);
     expect(report.leftovers).toEqual([]);
     expect(text).toMatch(/VERIFY OK/);
-    expect(text).toMatch(/WARN: region scan could not list secret: access denied/);
+    expect(text).toMatch(/WARN: region scan could not list kms-key: access denied/);
     expect(text).toMatch(/WARN: ec2-instance i-live/);
     expect(text.indexOf('VERIFY OK')).toBeLessThan(text.indexOf('WARN:'));
 

@@ -76,6 +76,9 @@ export function mockAws(
     'budgets',
     'serviceQuotas',
     'secretsManager',
+    'ssm',
+    'acm',
+    'xray',
     'kms',
     'elasticache',
     'opensearch',
@@ -113,9 +116,19 @@ export function exportEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   };
 }
 
+function traceSegment(name: string, note?: string): { Document: string } {
+  return {
+    Document: JSON.stringify({
+      name,
+      annotations: { operation: name === 'shop' ? 'checkout' : name, note },
+    }),
+  };
+}
+
 export function happyExportHandlers(description?: string): {
   cloudwatch: Record<string, Handler>;
   logs: Record<string, Handler>;
+  xray: Record<string, Handler>;
 } {
   return {
     cloudwatch: {
@@ -144,6 +157,24 @@ export function happyExportHandlers(description?: string): {
       StartQueryCommand: () => ({ queryId: 'q-test' }),
       GetQueryResultsCommand: () => ({ status: 'Complete', results: [] }),
       FilterLogEventsCommand: () => ({ events: [] }),
+    },
+    xray: {
+      GetTraceSummariesCommand: () => ({
+        TraceSummaries: [{ Id: 'trace-checkout-1' }],
+      }),
+      BatchGetTracesCommand: () => ({
+        Traces: [
+          {
+            Id: 'trace-checkout-1',
+            Segments: [
+              traceSegment('shop', description),
+              traceSegment('inventory'),
+              traceSegment('payment'),
+              traceSegment('delivery'),
+            ],
+          },
+        ],
+      }),
     },
   };
 }

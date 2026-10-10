@@ -1,10 +1,10 @@
 # Architecture
 
-This is an observability experiment shaped like an electronics store. The service boundaries below are fixed. Phase 1 only scaffolds them: each service answers `GET /health`, and business behavior is not implemented yet.
+This is an observability experiment shaped like an electronics store. The service boundaries below are fixed. Each service answers `GET /health`, and business behavior is not implemented yet.
 
 ## Services and data
 
-Four processes. Each one will own its own database (its own RDS instance once AWS infrastructure exists). No service reads another service's tables.
+Four processes. The CDK app gives each one its own private PostgreSQL instance. No service reads another service's tables. The processes themselves are still health endpoints.
 
 | Service     | Role                                                              |
 | ----------- | ----------------------------------------------------------------- |
@@ -31,7 +31,9 @@ An inventory reserve that cannot be filled is a business outcome: HTTP 409, out 
 
 ## Configuration
 
-Process configuration comes from environment variables. Provider-specific code is allowed only under `infra/<provider>/`. `infra/aws/` holds the experiment tag, the teardown command, and the deploy guard. It does not yet define the ECS or RDS stacks. Application packages do not import a cloud SDK.
+Process configuration comes from environment variables. Provider-specific code is allowed only under `infra/<provider>/`. `infra/aws/` holds the CDK demo stack, the experiment tag, the teardown command, and the deploy guard. Application packages do not import a cloud SDK.
+
+The demo runs in eu-central-1. Tasks are small public Fargate tasks so they can reach ECR and CloudWatch without a NAT gateway. Databases sit on isolated subnets. Shop traffic from the load generator uses an internal load balancer. An ADOT sidecar sends OTLP to CloudWatch metrics, X-Ray, and CloudWatch Logs, and keeps checkout, payment, delivery, errors, slow traces, and fault-tagged traces while sampling browse and cart. Grafana is one more small task. Its HTTPS load balancer security group starts with no inbound rules. Alerts exist only as Grafana rules generated from `observability/alerts.yml`. Database backups are off.
 
 ## Telemetry
 

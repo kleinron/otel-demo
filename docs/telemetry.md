@@ -30,7 +30,7 @@ Host resource detection is off. A machine address is not attached automatically.
 
 ## Logs
 
-`createLogger({ service })` writes one JSON object per line through pino.
+`createLogger({ service })` writes one JSON object per line through pino. The level defaults to `info`. The demo tasks set `LOG_LEVEL=info` and `OTEL_LOG_LEVEL=error` so the lines that reach CloudWatch stay small.
 
 Present on every line: `service`, `level`, `msg`, `time`.
 

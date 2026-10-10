@@ -28,6 +28,7 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/coverage/**',
       '**/cdk.out/**',
+      '**/*.cjs',
       'package-lock.json',
     ],
   },
