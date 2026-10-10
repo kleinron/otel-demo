@@ -1,0 +1,191 @@
+# Provider-neutral alert catalog for the otel-demo experiment.
+# CDK in infra/aws generates cloud alarms from this file. See observability/README.md.
+#
+# Thresholds are initial values to tune after baseline traffic.
+# severity: critical | warning | informational
+# informational alerts record a signal and must not page.
+# The 5xx numerator is HTTP status 500-599 only. HTTP 409 is an allocation
+# conflict and is counted only by inventory-allocation-conflict-rate.
+# Database-timeout and payment-delay fault injection exist and default to off.
+
+version: 1
+
+alerts:
+  - name: shop-add-to-cart-5xx-rate
+    signal: metric
+    scope:
+      service: shop
+      operation: add-to-cart
+    condition: "percentage of responses with HTTP status 500-599 is above the threshold; the numerator is 500-599 only, so HTTP 409 is excluded"
+    threshold: "2%"
+    window: "5m"
+    severity: critical
+    why: "A sustained server-error rate on add-to-cart means shoppers cannot fill a cart, which stops the funnel before checkout."
+
+  - name: shop-remove-from-cart-5xx-rate
+    signal: metric
+    scope:
+      service: shop
+      operation: remove-from-cart
+    condition: "percentage of responses with HTTP status 500-599 is above the threshold; the numerator is 500-599 only, so HTTP 409 is excluded"
+    threshold: "2%"
+    window: "5m"
+    severity: critical
+    why: "Server errors on remove-from-cart leave items in the cart after the shopper tried to drop them, so checkout sees a cart they did not intend."
+
+  - name: shop-checkout-5xx-rate
+    signal: metric
+    scope:
+      service: shop
+      operation: checkout
+    condition: "percentage of responses with HTTP status 500-599 is above the threshold; the numerator is 500-599 only, so HTTP 409 is excluded"
+    threshold: "2%"
+    window: "5m"
+    severity: critical
+    why: "Checkout is the customer-facing call that places the order, so a 5xx rate here means orders are failing across shop, inventory, and payment."
+
+  - name: shop-order-status-5xx-rate
+    signal: metric
+    scope:
+      service: shop
+      operation: order-status
+    condition: "percentage of responses with HTTP status 500-599 is above the threshold; the numerator is 500-599 only, so HTTP 409 is excluded"
+    threshold: "2%"
+    window: "5m"
+    severity: critical
+    why: "Order status is how a customer sees whether checkout finished, and server errors here hide a stuck payment or delivery."
+
+  - name: shop-add-to-cart-p99-latency
+    signal: metric
+    scope:
+      service: shop
+      operation: add-to-cart
+    condition: "p99 server-side latency is above the threshold"
+    threshold: "800ms"
+    window: "5m"
+    severity: warning
+    why: "Add-to-cart is a short shop call, and a p99 above 800ms is the initial signal that this path is slower than the experiment's latency budget."
+
+  - name: shop-checkout-p99-latency
+    signal: metric
+    scope:
+      service: shop
+      operation: checkout
+    condition: "p99 server-side latency is above the threshold"
+    threshold: "2s"
+    window: "5m"
+    severity: warning
+    why: "Checkout spans inventory and payment, and a p99 above 2 seconds is the initial latency budget for that customer-facing operation."
+
+  - name: shop-db-timeout-count
+    signal: metric
+    scope:
+      service: shop
+      operation: database
+    condition: "count of timed-out database client operations is above the threshold"
+    threshold: "0"
+    window: "5m"
+    severity: warning
+    why: "Timeouts on the shop database stall cart reads and writes, and they are unexpected while database-timeout injection is left at its default of off."
+
+  - name: inventory-db-timeout-count
+    signal: metric
+    scope:
+      service: inventory
+      operation: database
+    condition: "count of timed-out database client operations is above the threshold"
+    threshold: "0"
+    window: "5m"
+    severity: warning
+    why: "Timeouts on the inventory database stall allocation and stock checks, and they are unexpected while database-timeout injection is left at its default of off."
+
+  - name: payment-db-timeout-count
+    signal: metric
+    scope:
+      service: payment
+      operation: database
+    condition: "count of timed-out database client operations is above the threshold"
+    threshold: "0"
+    window: "5m"
+    severity: warning
+    why: "Timeouts on the payment database can leave a charge unknown or authorized without capture, and they are unexpected while database-timeout injection is left at its default of off."
+
+  - name: delivery-db-timeout-count
+    signal: metric
+    scope:
+      service: delivery
+      operation: database
+    condition: "count of timed-out database client operations is above the threshold"
+    threshold: "0"
+    window: "5m"
+    severity: warning
+    why: "Timeouts on the delivery database stall order progress after payment, and they are unexpected while database-timeout injection is left at its default of off."
+
+  - name: payment-stuck-unknown
+    signal: metric
+    scope:
+      service: payment
+      operation: resolve-payment
+    condition: "count of payments in state unknown for longer than the threshold is at least 1"
+    threshold: "2m"
+    window: "5m"
+    severity: critical
+    why: "A payment left in unknown has an unresolved charge outcome, and retrying it blindly can double-charge the customer."
+
+  - name: payment-stuck-authorized-not-captured
+    signal: metric
+    scope:
+      service: payment
+      operation: capture
+    condition: "count of payments in state authorized with no capture for longer than the threshold is at least 1"
+    threshold: "2m"
+    window: "5m"
+    severity: critical
+    why: "A payment left authorized without capture holds customer funds without completing the order."
+
+  - name: inventory-allocation-conflict-rate
+    signal: metric
+    scope:
+      service: inventory
+      operation: allocate
+    group_by: sku_category
+    condition: "percentage of allocation attempts that end in a conflict is above the threshold, grouped by SKU category; HTTP 409 is counted here and is excluded from every 5xx numerator"
+    threshold: "10%"
+    window: "15m"
+    severity: informational
+    why: "Allocation conflicts are expected contention inside a SKU category, so this rate is informational and the HTTP 409 responses must not count toward the 5xx alarms."
+
+  - name: inventory-out-of-stock-rate
+    signal: metric
+    scope:
+      service: inventory
+      operation: allocate
+    group_by: sku_category
+    condition: "percentage of allocation attempts that end as out-of-stock is above the threshold, grouped by SKU category"
+    threshold: "10%"
+    window: "15m"
+    severity: informational
+    why: "Out-of-stock by SKU category is a capacity signal for the catalog under test, and it stays informational so it does not page or consume the 5xx budget."
+
+  - name: load-generator-exceeds-caps
+    signal: metric
+    scope:
+      service: load-generator
+      operation: generate-load
+    condition: "request rate or in-flight concurrency is above the threshold"
+    threshold: "configured cap for that limit"
+    window: "5m"
+    severity: warning
+    why: "A load generator running above its configured rate or concurrency caps makes latency and error alerts describe an overload rather than the intended experiment."
+
+  - name: experiment-budget
+    signal: metric
+    scope:
+      service: experiment
+      operation: budget
+    retain_on_teardown: true
+    condition: "actual monthly spend or forecasted month-end spend is above the threshold"
+    threshold: "100% of the configured experiment budget"
+    window: "billing-month"
+    severity: warning
+    why: "This AWS Budgets alert is the cost backstop for the experiment, and it stays in place after the workload is destroyed."
