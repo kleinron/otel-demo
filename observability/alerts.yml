@@ -9,11 +9,11 @@
 # Database-timeout and payment-delay fault injection exist and default to off.
 #
 # missing_data is how an alarm treats a window with no datapoints.
-# Ratio (5xx) and latency (p99) alarms set not_breaching: a stopped load
-# generator or a quiet period produces no datapoints and must not count as
-# a failure. Count-based alarms (database timeouts, payments stuck) also set
-# not_breaching. request-rate-zero sets breaching: no data means a dead load
-# generator or broken routing.
+# Ratio (5xx and outbound error) and latency (p99) alarms set not_breaching:
+# a stopped load generator or a quiet period produces no datapoints and must
+# not count as a failure. Count-based alarms (database timeouts, payments
+# stuck) also set not_breaching. request-rate-zero sets breaching: no data
+# means a dead load generator or broken routing.
 
 version: 1
 
@@ -95,6 +95,136 @@ alerts:
     missing_data: not_breaching
     severity: warning
     why: 'Checkout is low volume, so a p99 over a short window is just the slowest request.'
+
+  - name: inventory-5xx-rate
+    signal: metric
+    scope:
+      service: inventory
+      operation: all
+    condition: 'percentage of responses with HTTP status 500-599 is above the threshold; the numerator is 500-599 only, so HTTP 409 is excluded'
+    threshold: '2%'
+    window: '5m'
+    min_request_count: 20
+    missing_data: not_breaching
+    severity: critical
+    why: 'A sustained server-error rate on inventory means stock checks and allocation are failing, and HTTP 409 allocation conflicts stay out of this numerator.'
+
+  - name: payment-5xx-rate
+    signal: metric
+    scope:
+      service: payment
+      operation: all
+    condition: 'percentage of responses with HTTP status 500-599 is above the threshold; the numerator is 500-599 only, so HTTP 409 is excluded'
+    threshold: '2%'
+    window: '5m'
+    min_request_count: 20
+    missing_data: not_breaching
+    severity: critical
+    why: 'A sustained server-error rate on payment means charges are failing before checkout can finish.'
+
+  - name: delivery-5xx-rate
+    signal: metric
+    scope:
+      service: delivery
+      operation: all
+    condition: 'percentage of responses with HTTP status 500-599 is above the threshold; the numerator is 500-599 only, so HTTP 409 is excluded'
+    threshold: '2%'
+    window: '5m'
+    min_request_count: 20
+    missing_data: not_breaching
+    severity: critical
+    why: 'A sustained server-error rate on delivery means paid orders are not being handed off.'
+
+  - name: inventory-p99-latency
+    signal: metric
+    scope:
+      service: inventory
+      operation: all
+    condition: 'p99 server-side latency is above the threshold'
+    threshold: '500ms'
+    window: '10m'
+    min_request_count: 20
+    missing_data: not_breaching
+    severity: warning
+    why: 'Inventory is on the cart and checkout path, and a server-side p99 above 500ms is the initial signal that stock calls are slower than the latency budget.'
+
+  - name: payment-p99-latency
+    signal: metric
+    scope:
+      service: payment
+      operation: all
+    condition: 'p99 server-side latency is above the threshold'
+    threshold: '1s'
+    window: '10m'
+    min_request_count: 20
+    missing_data: not_breaching
+    severity: warning
+    why: 'Payment is on the checkout path, and a server-side p99 above 1s is the initial signal that charges are slower than the latency budget.'
+
+  - name: delivery-p99-latency
+    signal: metric
+    scope:
+      service: delivery
+      operation: all
+    condition: 'p99 server-side latency is above the threshold'
+    threshold: '1s'
+    window: '10m'
+    min_request_count: 20
+    missing_data: not_breaching
+    severity: warning
+    why: 'Delivery runs after payment, and a server-side p99 above 1s is the initial signal that handoff is slower than the latency budget.'
+
+  - name: shop-outbound-error-rate
+    signal: metric
+    scope:
+      service: shop
+      operation: outbound
+    condition: 'percentage of outbound calls to other services and to the service database that end in error is above the threshold'
+    threshold: '5%'
+    window: '5m'
+    min_request_count: 20
+    missing_data: not_breaching
+    severity: warning
+    why: 'Shop calls inventory, payment, and delivery, plus its own database, and an outbound error rate above 5% means those calls are failing.'
+
+  - name: inventory-outbound-error-rate
+    signal: metric
+    scope:
+      service: inventory
+      operation: outbound
+    condition: 'percentage of outbound calls to other services and to the service database that end in error is above the threshold'
+    threshold: '5%'
+    window: '5m'
+    min_request_count: 20
+    missing_data: not_breaching
+    severity: warning
+    why: 'Inventory calls its own database, and an outbound error rate above 5% means those calls are failing even when the inbound 5xx rate stays under its threshold.'
+
+  - name: payment-outbound-error-rate
+    signal: metric
+    scope:
+      service: payment
+      operation: outbound
+    condition: 'percentage of outbound calls to other services and to the service database that end in error is above the threshold'
+    threshold: '5%'
+    window: '5m'
+    min_request_count: 20
+    missing_data: not_breaching
+    severity: warning
+    why: 'Payment calls its own database, and an outbound error rate above 5% means those calls are failing even when the inbound 5xx rate stays under its threshold.'
+
+  - name: delivery-outbound-error-rate
+    signal: metric
+    scope:
+      service: delivery
+      operation: outbound
+    condition: 'percentage of outbound calls to other services and to the service database that end in error is above the threshold'
+    threshold: '5%'
+    window: '5m'
+    min_request_count: 20
+    missing_data: not_breaching
+    severity: warning
+    why: 'Delivery calls its own database, and an outbound error rate above 5% means those calls are failing even when the inbound 5xx rate stays under its threshold.'
 
   - name: shop-db-timeout-count
     signal: metric
