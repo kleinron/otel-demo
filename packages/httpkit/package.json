@@ -1,0 +1,17 @@
+{
+  "name": "@otel-demo/httpkit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "HTTP span lifecycle, W3C traceparent client, and process helpers.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@otel-demo/telemetry": "*",
+    "fastify": "^5.12.5"
+  }
+}

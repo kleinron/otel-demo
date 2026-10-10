@@ -1,0 +1,101 @@
+# Local databases and services. Postgres trusts connections on this private compose network.
+# Do not reuse that setting outside local development.
+
+x-http-health: &http-health
+  interval: 2s
+  timeout: 2s
+  retries: 20
+  test:
+    [
+      'CMD',
+      'node',
+      '-e',
+      "fetch('http://localhost:' + process.env.PORT + '/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+    ]
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: otel
+      POSTGRES_DB: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - '5432:5432'
+    volumes:
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U otel -d postgres']
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  inventory:
+    build:
+      context: .
+      dockerfile: services/inventory/Dockerfile
+    environment:
+      DATABASE_URL: postgres://otel@postgres:5432/inventory
+      LISTEN_ANY: 'true'
+      PORT: '3002'
+    ports:
+      - '3002:3002'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck: *http-health
+
+  payment:
+    build:
+      context: .
+      dockerfile: services/payment/Dockerfile
+    environment:
+      DATABASE_URL: postgres://otel@postgres:5432/payment
+      PAYMENT_LATENCY_MS: '0'
+      LISTEN_ANY: 'true'
+      PORT: '3003'
+    ports:
+      - '3003:3003'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck: *http-health
+
+  delivery:
+    build:
+      context: .
+      dockerfile: services/delivery/Dockerfile
+    environment:
+      DATABASE_URL: postgres://otel@postgres:5432/delivery
+      LISTEN_ANY: 'true'
+      PORT: '3004'
+    ports:
+      - '3004:3004'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck: *http-health
+
+  shop:
+    build:
+      context: .
+      dockerfile: services/shop/Dockerfile
+    environment:
+      DATABASE_URL: postgres://otel@postgres:5432/shop
+      INVENTORY_URL: http://inventory:3002
+      PAYMENT_URL: http://payment:3003
+      DELIVERY_URL: http://delivery:3004
+      LISTEN_ANY: 'true'
+      PORT: '3001'
+    ports:
+      - '3001:3001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      inventory:
+        condition: service_healthy
+      payment:
+        condition: service_healthy
+      delivery:
+        condition: service_healthy
+    healthcheck: *http-health

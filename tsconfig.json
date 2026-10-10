@@ -2,6 +2,8 @@
   "files": [],
   "references": [
     { "path": "packages/telemetry" },
+    { "path": "packages/db" },
+    { "path": "packages/httpkit" },
     { "path": "services/shop" },
     { "path": "services/inventory" },
     { "path": "services/payment" },

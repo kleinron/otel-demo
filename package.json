@@ -21,7 +21,8 @@
     "format:check": "prettier --check .",
     "teardown": "tsx scripts/teardown.ts",
     "teardown:rehearsal": "tsx scripts/teardown-rehearsal.ts",
-    "deploy:check": "tsx scripts/deploy-check.ts"
+    "deploy:check": "tsx scripts/deploy-check.ts",
+    "seed": "tsx scripts/seed.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

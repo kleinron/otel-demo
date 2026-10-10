@@ -1,0 +1,4 @@
+CREATE DATABASE shop;
+CREATE DATABASE inventory;
+CREATE DATABASE payment;
+CREATE DATABASE delivery;
