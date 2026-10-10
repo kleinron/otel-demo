@@ -1,0 +1,17 @@
+# Local environment and secrets
+.env*
+
+# Experiment outputs (kept off the public remote)
+results/
+raw/
+
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# AWS CDK and local cloud credentials
+cdk.out/
+.aws/
+*.pem
