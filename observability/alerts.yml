@@ -1,5 +1,6 @@
 # Provider-neutral alert catalog for the otel-demo experiment.
-# CDK in infra/aws generates cloud alarms from this file. See observability/README.md.
+# A generator produces Grafana alert-rule provisioning files from this file.
+# See observability/README.md. CloudWatch alarms are not generated.
 #
 # Thresholds are initial values to tune after baseline traffic.
 # severity: critical | warning | informational
@@ -8,12 +9,13 @@
 # conflict and is counted only by inventory-allocation-conflict-rate.
 # Database-timeout and payment-delay fault injection exist and default to off.
 #
-# missing_data is how an alarm treats a window with no datapoints.
-# Ratio (5xx and outbound error) and latency (p99) alarms set not_breaching:
+# missing_data is how a rule treats a window with no datapoints.
+# Ratio (5xx and outbound error) and latency (p99) rules set not_breaching:
 # a stopped load generator or a quiet period produces no datapoints and must
-# not count as a failure. Count-based alarms (database timeouts, payments
+# not count as a failure. Count-based rules (database timeouts, payments
 # stuck) also set not_breaching. request-rate-zero sets breaching: no data
 # means a dead load generator or broken routing.
+# not_breaching maps to Grafana noDataState OK. breaching maps to Alerting.
 
 version: 1
 
