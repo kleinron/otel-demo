@@ -8,6 +8,8 @@ Customer-facing 5xx alerts cover add-to-cart, remove-from-cart, checkout, and or
 
 Faults run in scheduled windows (for example about 10 minutes at high probability every few hours). Each window logs start and end markers, so alerts are expected to fire during those windows. Thresholds remain initial values to tune.
 
+The spike schedule and the alarm each spike is expected to fire are in [expected-alarms.md](expected-alarms.md).
+
 ## Fields
 
 | Field                | Meaning                                                                                                                                                                                  |
