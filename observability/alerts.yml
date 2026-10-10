@@ -189,3 +189,14 @@ alerts:
     window: 'billing-month'
     severity: warning
     why: 'This AWS Budgets alert is the cost backstop for the experiment, and it stays in place after the workload is destroyed.'
+
+  - name: cloudwatch-log-ingestion-volume
+    signal: metric
+    scope:
+      service: experiment
+      operation: log-ingestion
+    condition: 'cumulative CloudWatch Logs ingested since the run started is above the threshold'
+    threshold: '3 GB cumulative; a rate over ~40 MB/hour is the early signal'
+    window: '72h'
+    severity: warning
+    why: 'Runaway log volume is the largest cost driver and the High scenario exceeds the $75 cap; 3 GB cumulative is above the 1-2 GB the agreed load profile should produce.'
