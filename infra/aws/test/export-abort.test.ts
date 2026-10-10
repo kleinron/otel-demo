@@ -1,9 +1,11 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { cloudWatchAlarmNames } from '../src/catalog.js';
+import { readAlarmNames } from '../src/catalog.js';
 import { redactText } from '../src/redact.js';
+import { BUDGET_CATALOG_NAME } from '../src/tags.js';
 import { runTeardown } from '../src/teardown.js';
 import {
   commandNames,
@@ -182,12 +184,13 @@ describe('export abort', () => {
       files: string[];
     };
     const alarm = readFileSync(join(directory, 'alarms', 'shop-checkout-5xx-rate.json'), 'utf8');
-    const names = cloudWatchAlarmNames(readFileSync(ALERTS, 'utf8'));
+    const names = await readAlarmNames(fileURLToPath(ALERTS));
+    const alarmFiles = marker.files.filter((file) => file.startsWith('alarms/'));
 
     expect(result.exitCode).toBe(0);
     expect(result.report).toMatch(/EXPORT_OK/);
-    expect(names).toHaveLength(15);
-    expect(names).not.toContain('experiment-budget');
+    expect(alarmFiles).toEqual(names.map((name) => `alarms/${name}.json`));
+    expect(names).not.toContain(BUDGET_CATALOG_NAME);
     expect(marker.files).toEqual(
       expect.arrayContaining(['run-record.json', 'insights/otel-demo-errors.json']),
     );

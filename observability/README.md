@@ -6,6 +6,10 @@ Another engineer owns the AWS CDK app in `infra/aws`. That app generates the dep
 
 Customer-facing 5xx alerts cover add-to-cart, remove-from-cart, checkout, and order status. The 5xx numerator is HTTP 500–599. Allocation conflicts return HTTP 409 and are only on the informational per-SKU-category alerts, so they do not contribute to the 5xx alarms. Informational severity must not page. The `experiment-budget` entry is an AWS Budgets alert (`retain_on_teardown: true`), not an application metric, and teardown leaves it in place. See [teardown-checklist.md](teardown-checklist.md).
 
+Faults run in scheduled windows (for example about 10 minutes at high probability every few hours). Each window logs start and end markers, so alerts are expected to fire during those windows. Thresholds remain initial values to tune.
+
+The spike schedule and the alarm each spike is expected to fire are in [expected-alarms.md](expected-alarms.md).
+
 ## Fields
 
 | Field                | Meaning                                                                                                                                                                                  |
@@ -17,6 +21,7 @@ Customer-facing 5xx alerts cover add-to-cart, remove-from-cart, checkout, and or
 | `condition`          | What is compared with the threshold.                                                                                                                                                     |
 | `threshold`          | Initial trip point. Numeric caps for the load generator, and the budget amount, live in their own configuration.                                                                         |
 | `window`             | Total evaluation window. The generator chooses periods that cover it.                                                                                                                    |
+| `min_request_count`  | Optional. The alarm cannot fire unless the window has at least this many requests. CDK and GCP generators implement it with a metric-math condition on the request count.                |
 | `severity`           | `critical`, `warning`, or `informational`.                                                                                                                                               |
 | `why`                | One sentence, copied into the alarm description.                                                                                                                                         |
 | `retain_on_teardown` | Optional. Set only on the budget alert.                                                                                                                                                  |
