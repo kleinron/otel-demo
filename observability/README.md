@@ -6,9 +6,7 @@ Another engineer owns the AWS CDK app in `infra/aws`. That app generates the dep
 
 Customer-facing 5xx alerts cover add-to-cart, remove-from-cart, checkout, and order status. The 5xx numerator is HTTP 500–599. Allocation conflicts return HTTP 409 and are only on the informational per-SKU-category alerts, so they do not contribute to the 5xx alarms. Informational severity must not page. The `experiment-budget` entry is an AWS Budgets alert (`retain_on_teardown: true`), not an application metric, and teardown leaves it in place. See [teardown-checklist.md](teardown-checklist.md).
 
-Faults run in scheduled windows (for example about 10 minutes at high probability every few hours). Each window logs start and end markers, so alerts are expected to fire during those windows. Thresholds remain initial values to tune.
-
-The spike schedule and the alarm each spike is expected to fire are in [expected-alarms.md](expected-alarms.md).
+Faults are paired with spikes and run for 15–20 minutes. Each window logs start and end markers. Alerts may fire during those windows, and each outcome is scored against the hypotheses in [expected-alarms.md](expected-alarms.md). Thresholds remain initial values to tune.
 
 ## Fields
 
