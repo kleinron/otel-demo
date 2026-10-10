@@ -4,7 +4,7 @@ This is an observability experiment shaped like an electronics store. The servic
 
 ## Services and data
 
-Four processes. Each one will own its own database (its own RDS instance once AWS infrastructure exists). No service reads another service's tables.
+Four processes. Each one owns its own database. The CDK app gives each one a private PostgreSQL instance. No service reads another service's tables.
 
 | Service     | Role                                                                                         |
 | ----------- | -------------------------------------------------------------------------------------------- |
@@ -33,7 +33,9 @@ Reference data is loaded by `npm run seed`: 1000 deterministic customers (Englis
 
 ## Configuration
 
-Process configuration comes from environment variables. Provider-specific code is allowed only under `infra/<provider>/`. `infra/aws/` holds the experiment tag, the teardown command, and the deploy guard. It does not yet define the ECS or RDS stacks. Application packages do not import a cloud SDK.
+Process configuration comes from environment variables. Provider-specific code is allowed only under `infra/<provider>/`. `infra/aws/` holds the CDK demo stack, the experiment tag, the teardown command, and the deploy guard. Application packages do not import a cloud SDK.
+
+The demo runs in eu-central-1. Tasks are small public Fargate tasks so they can reach ECR and CloudWatch without a NAT gateway. Databases sit on isolated subnets. Shop traffic from the load generator uses an internal load balancer. An ADOT sidecar sends OTLP to CloudWatch metrics, X-Ray, and CloudWatch Logs, and keeps checkout, payment, delivery, errors, slow traces, and fault-tagged traces while sampling browse and cart. Grafana is one more small task, plain HTTP on port 3000, with a security group that starts with no inbound rules. Plain HTTP is acceptable for this throwaway demo. The admin password is only in Secrets Manager and is not used anywhere else. Alerts exist only as Grafana rules generated from `observability/alerts.yml`. Database backups are off.
 
 ## Load
 

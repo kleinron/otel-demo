@@ -2,9 +2,10 @@ node_modules
 **/node_modules
 dist
 **/dist
-.git
+cdk.out
 results
 raw
+.git
 coverage
 *.tsbuildinfo
 *.pem

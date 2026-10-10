@@ -15,7 +15,9 @@ import { ResourceGroupsTaggingAPIClient } from '@aws-sdk/client-resource-groups-
 import { S3Client } from '@aws-sdk/client-s3';
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { ServiceQuotasClient } from '@aws-sdk/client-service-quotas';
+import { SSMClient } from '@aws-sdk/client-ssm';
 import { STSClient } from '@aws-sdk/client-sts';
+import { XRayClient } from '@aws-sdk/client-xray';
 import type { SdkClient, SdkCommand, TeardownClients } from './types.js';
 
 const USER_AGENT = 'otel-demo-safety';
@@ -45,6 +47,8 @@ export function createClients(region: string, budgetsRegion: string): TeardownCl
     budgets: asSdk(new BudgetsClient({ region: budgetsRegion, customUserAgent: USER_AGENT })),
     serviceQuotas: asSdk(new ServiceQuotasClient(settings)),
     secretsManager: asSdk(new SecretsManagerClient(settings)),
+    ssm: asSdk(new SSMClient(settings)),
+    xray: asSdk(new XRayClient(settings)),
     kms: asSdk(new KMSClient(settings)),
     elasticache: asSdk(new ElastiCacheClient(settings)),
     opensearch: asSdk(new OpenSearchClient(settings)),

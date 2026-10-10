@@ -8,11 +8,15 @@ export const RESOURCE_KINDS = [
   'nat-gateway',
   'elastic-ip',
   'network-interface',
+  'security-group',
   'load-balancer',
   'target-group',
   'ecr-repository',
   'ecs-cluster',
   'ecs-service',
+  'ecs-task',
+  'secret',
+  'ssm-parameter',
   'cloudformation-stack',
   's3-bucket',
   'other',
@@ -64,6 +68,8 @@ export interface TeardownClients {
   budgets: SdkClient;
   serviceQuotas: SdkClient;
   secretsManager: SdkClient;
+  ssm: SdkClient;
+  xray: SdkClient;
   kms: SdkClient;
   elasticache: SdkClient;
   opensearch: SdkClient;

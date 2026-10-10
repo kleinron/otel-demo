@@ -1,6 +1,6 @@
 # infra/aws
 
-Safety tooling that has to exist before any experiment resource is created. There is no ECS or RDS stack in this directory yet. When that CDK app is added, it is the only place provider-specific code belongs, and every construct must use the tag below.
+Safety tooling and the demo CDK app. This is the only place provider-specific code belongs. Every construct inherits the tag below from the app. Database backups are off. `cdk destroy` is expected to finish without a retained database, log group, repository, or snapshot.
 
 ## Tagging contract
 
@@ -29,6 +29,7 @@ npm run teardown:rehearsal
 npm run teardown -- --dry-run
 npm run teardown -- --region eu-central-1
 npm run deploy:check
+npm run synth -w @otel-demo/infra-aws
 ```
 
 Region defaults to `eu-central-1`. Cloud settings come from environment variables. See [docs/teardown.md](../../docs/teardown.md).
@@ -43,16 +44,20 @@ After the tagged and named verify check, teardown scans the region for billable 
 
 `deploy:check` refuses a deploy unless credentials are valid, `EXPERIMENT_HARD_STOP_UTC` leaves at least five days (a 72-hour run plus export and teardown), the `otel-demo-experiment` budget exists, and RDS and VPC quotas cover 4 `db.t4g.micro` instances and 1 VPC.
 
-Until `cdk.json` exists, teardown deletes experiment stacks with the CloudFormation API. It never deletes `CDKToolkit`.
+`cdk.json` is present, so teardown runs `npx cdk destroy` for experiment stacks only. It never deletes `CDKToolkit`.
 
-## CDK requirements for a clean destroy
+## Clean destroy
 
-When the stack lands in this directory, `cdk destroy` has to finish without manual cleanup. The constructs must use:
+The stack in `src/cdk` uses:
 
-- RDS instances and clusters: `removalPolicy: RemovalPolicy.DESTROY`, `deletionProtection: false`, and the skip-final-snapshot equivalent so destroy does not leave a snapshot behind.
-- CloudWatch log groups: 7-day retention and `removalPolicy: RemovalPolicy.DESTROY`.
-- ECR repositories: `emptyOnDelete: true`, or `autoDeleteImages` where the construct still uses that name.
-- S3 buckets: `autoDeleteObjects: true`.
-- The experiment tag once, on the app, so every construct inherits it: `Tags.of(app).add('experiment', 'otel-demo')`.
+- RDS: `RemovalPolicy.DESTROY`, `deletionProtection: false`, backup retention 0, and no final snapshot. Database backups are off on purpose.
+- CloudWatch log groups: 7-day retention and `RemovalPolicy.DESTROY`.
+- ECR repositories: `emptyOnDelete: true`.
+- The experiment tag once, on the app: `Tags.of(app).add('experiment', 'otel-demo')`.
+- No S3 buckets. A later bucket still needs `autoDeleteObjects: true`.
 
-Do not put account ids, ARNs, IP addresses, or credentials in this tree.
+Verify also lists security groups (including the Grafana task group), running ECS tasks (including Grafana), Secrets Manager secrets (including the Grafana admin password), and the SSM faults parameter, and deletes any of those that remain. Deploy with `--region eu-central-1`. Synth does not call AWS.
+
+`npm run grafana:url` prints the Grafana task's current public address. The security group starts with no inbound rules; add your address on port 3000 after every deploy.
+
+Do not put account ids, ARNs, IP addresses, or credentials in this tree. Cost notes: [docs/cost-estimate.md](../../docs/cost-estimate.md).

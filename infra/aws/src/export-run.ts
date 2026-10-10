@@ -7,10 +7,15 @@ import {
   GetQueryResultsCommand,
   StartQueryCommand,
 } from '@aws-sdk/client-cloudwatch-logs';
+import { BatchGetTracesCommand, GetTraceSummariesCommand } from '@aws-sdk/client-xray';
 import { readAlarmNames } from './catalog.js';
 import type { SafetyConfig } from './config.js';
+import { readCatalog } from './grafana/catalog.js';
+import { buildProvisioningFiles } from './grafana/provision.js';
+import { ALERT_LOG_GROUP } from './names.js';
 import { safeError, redactText } from './redact.js';
 import { asArray, asRecord, asString } from './text.js';
+import { CHECKOUT_TRACE_FILTERS, shapeTrace } from './traces.js';
 import type { SdkClient, TeardownClients } from './types.js';
 
 const MAX_LOG_EVENTS = 20_000;
@@ -105,6 +110,16 @@ export async function exportRun(input: {
     const names = await readAlarmNames(input.config.alertsPath);
     const alarms = await fetchAlarms(input.clients.cloudwatch, names);
     await writeJson(directory, 'run-record.json', record, files);
+    if (alarms.length === 0) {
+      await writeJson(
+        directory,
+        join('alarms', 'not-used.json'),
+        {
+          note: 'CloudWatch alarms are not generated. Alert evidence is grafana_alert_state_change log lines.',
+        },
+        files,
+      );
+    }
     for (const alarm of alarms) {
       await writeJson(directory, join('alarms', `${safeStem(alarm.alarmName)}.json`), alarm, files);
     }
@@ -143,6 +158,8 @@ export async function exportRun(input: {
       );
       await writeJson(directory, join('logs', `${safeStem(logGroup)}.json`), events, files);
     }
+    await exportAlertEvidence(input, directory, record, files);
+    await exportTraces(input, directory, record, files);
     for (const file of files) {
       const info = await stat(join(directory, file));
       if (info.size === 0) {
@@ -256,9 +273,8 @@ async function fetchAlarms(cloudwatch: SdkClient, names: string[]): Promise<Alar
     token = next;
   }
 
-  const missing = names.filter((name) => !found.has(name));
-  if (missing.length > 0) {
-    throw new Error(`alarm history is missing for ${missing.join(', ')}`);
+  if (found.size === 0) {
+    return [];
   }
 
   for (const name of names) {
@@ -380,11 +396,116 @@ async function runSavedQuery(
   throw new Error(`saved query ${definition.name} did not finish`);
 }
 
+async function exportAlertEvidence(
+  input: { clients: TeardownClients; config: SafetyConfig },
+  directory: string,
+  record: RunRecord,
+  files: string[],
+): Promise<void> {
+  const events = await fetchLogEvents(
+    input.clients.logs,
+    ALERT_LOG_GROUP,
+    Date.parse(record.startedAt),
+    Date.parse(record.endedAt),
+    'grafana_alert_state_change',
+  );
+  await writeJson(directory, join('alerts', 'state-changes.json'), events, files);
+  const rules = Object.entries(buildProvisioningFiles(readCatalog(input.config.alertsPath))).filter(
+    ([name]) => name.startsWith('alerting/'),
+  );
+  if (rules.length === 0) {
+    throw new Error('Grafana-provisioned rule files were not generated');
+  }
+  for (const [name, body] of rules) {
+    await writeText(
+      directory,
+      join('alerts', 'rules', name.slice('alerting/'.length)),
+      body,
+      files,
+    );
+  }
+}
+
+async function exportTraces(
+  input: { clients: TeardownClients; config: SafetyConfig },
+  directory: string,
+  record: RunRecord,
+  files: string[],
+): Promise<void> {
+  const ids = await traceIds(input.clients.xray, record.startedAt, record.endedAt);
+  if (ids.length === 0) {
+    if (input.config.checkoutCount !== 0) {
+      throw new Error(
+        'No traces exported. The export failed unless the run recorded zero checkouts (EXPERIMENT_CHECKOUT_COUNT=0).',
+      );
+    }
+    await writeJson(
+      directory,
+      join('traces', 'none.json'),
+      { checkouts: 0, traces: [], missingHops: [] },
+      files,
+    );
+    return;
+  }
+  for (const id of ids) {
+    const segments = await traceSegments(input.clients.xray, id);
+    await writeJson(
+      directory,
+      join('traces', `${safeStem(id)}.json`),
+      shapeTrace(id, segments),
+      files,
+    );
+  }
+}
+
+async function traceIds(xray: SdkClient, startedAt: string, endedAt: string): Promise<string[]> {
+  const ids = new Set<string>();
+  for (const filter of CHECKOUT_TRACE_FILTERS) {
+    let token: string | undefined;
+    const seen = new Set<string>();
+    for (;;) {
+      const page = asRecord(
+        await xray.send(
+          new GetTraceSummariesCommand({
+            StartTime: new Date(startedAt),
+            EndTime: new Date(endedAt),
+            FilterExpression: filter,
+            NextToken: token,
+          }),
+        ),
+      );
+      for (const item of asArray(page.TraceSummaries)) {
+        const id = asString(asRecord(item).Id);
+        if (id) {
+          ids.add(id);
+        }
+        if (ids.size >= 20) {
+          return [...ids];
+        }
+      }
+      const next = asString(page.NextToken);
+      if (!next || seen.has(next)) {
+        break;
+      }
+      seen.add(next);
+      token = next;
+    }
+  }
+  return [...ids];
+}
+
+async function traceSegments(xray: SdkClient, id: string): Promise<unknown[]> {
+  const page = asRecord(await xray.send(new BatchGetTracesCommand({ TraceIds: [id] })));
+  const trace = asRecord(asArray(page.Traces)[0]);
+  return asArray(trace.Segments);
+}
+
 async function fetchLogEvents(
   logs: SdkClient,
   logGroup: string,
   startTime: number,
   endTime: number,
+  filterPattern?: string,
 ): Promise<Record<string, unknown>> {
   const events: unknown[] = [];
   let token: string | undefined;
@@ -397,16 +518,23 @@ async function fetchLogEvents(
             logGroupName: logGroup,
             startTime,
             endTime,
+            filterPattern,
             nextToken: token,
             limit: 1000,
           }),
         ),
       );
       events.push(
-        ...asArray(page.events).map((event) => {
-          const record = asRecord(event);
-          return { timestamp: record.timestamp, message: record.message };
-        }),
+        ...asArray(page.events)
+          .map((event) => {
+            const record = asRecord(event);
+            return { timestamp: record.timestamp, message: record.message };
+          })
+          .filter(
+            (event) =>
+              !filterPattern ||
+              (typeof event.message === 'string' && event.message.includes(filterPattern)),
+          ),
       );
       if (events.length > MAX_LOG_EVENTS) {
         throw new Error(`log group ${logGroup} exceeded the export event cap`);
@@ -432,6 +560,19 @@ async function fetchLogEvents(
     throw error;
   }
   return { logGroup, events };
+}
+
+async function writeText(
+  directory: string,
+  relative: string,
+  value: string,
+  files: string[],
+): Promise<void> {
+  const target = join(directory, relative);
+  await mkdir(dirname(target), { recursive: true });
+  const body = value.endsWith('\n') ? value : `${value}\n`;
+  await writeFile(target, redactText(body), 'utf8');
+  files.push(relative);
 }
 
 async function writeJson(

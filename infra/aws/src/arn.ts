@@ -81,6 +81,17 @@ function mapResource(
     const name = resource.replace(/^stack\//, '').split('/')[0] ?? resource;
     return { kind: 'cloudformation-stack', name, deleteRef: name };
   }
+  if (service === 'secretsmanager') {
+    const raw = resource.startsWith('secret:') ? resource.slice('secret:'.length) : resource;
+    const name = raw.replace(/-[A-Za-z0-9]{6}$/, '');
+    return { kind: 'secret', name, deleteRef: name };
+  }
+  if (service === 'ssm') {
+    const name = resource.startsWith('parameter')
+      ? `/${resource.slice('parameter/'.length)}`
+      : resource;
+    return { kind: 'ssm-parameter', name, deleteRef: name };
+  }
   const slash = resource.includes('/') ? resource : resource;
   return { kind: 'other', name: `${service}/${slash}`, deleteRef: arn };
 }
@@ -124,6 +135,9 @@ function mapEc2(
   if (kind === 'network-interface') {
     return { kind: 'network-interface', name, deleteRef: name };
   }
+  if (kind === 'security-group') {
+    return { kind: 'security-group', name, deleteRef: name };
+  }
   return { kind: 'other', name: `ec2/${resource}`, deleteRef: arn };
 }
 
@@ -157,6 +171,12 @@ function mapEcs(resource: string): Pick<ExperimentResource, 'kind' | 'name' | 'd
     const service = bits[2] ?? resource;
     const name = cluster ? `${cluster}/${service}` : service;
     return { kind: 'ecs-service', name, deleteRef: name };
+  }
+  if (bits[0] === 'task') {
+    const cluster = bits[1] ?? '';
+    const task = bits[2] ?? resource;
+    const name = cluster ? `${cluster}/${task}` : task;
+    return { kind: 'ecs-task', name, deleteRef: name };
   }
   return { kind: 'other', name: `ecs/${resource}`, deleteRef: resource };
 }

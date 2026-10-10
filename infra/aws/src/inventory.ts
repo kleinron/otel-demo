@@ -4,9 +4,15 @@ import {
   DescribeAddressesCommand,
   DescribeNatGatewaysCommand,
   DescribeNetworkInterfacesCommand,
+  DescribeSecurityGroupsCommand,
 } from '@aws-sdk/client-ec2';
 import { DescribeRepositoriesCommand } from '@aws-sdk/client-ecr';
-import { DescribeClustersCommand, ListClustersCommand } from '@aws-sdk/client-ecs';
+import {
+  DescribeClustersCommand,
+  DescribeTasksCommand,
+  ListClustersCommand,
+  ListTasksCommand,
+} from '@aws-sdk/client-ecs';
 import {
   DescribeLoadBalancersCommand as DescribeClassicLoadBalancersCommand,
   DescribeTagsCommand as DescribeClassicTagsCommand,
@@ -25,6 +31,8 @@ import {
 } from '@aws-sdk/client-rds';
 import { GetResourcesCommand } from '@aws-sdk/client-resource-groups-tagging-api';
 import { GetBucketLocationCommand, ListBucketsCommand } from '@aws-sdk/client-s3';
+import { ListSecretsCommand } from '@aws-sdk/client-secrets-manager';
+import { DescribeParametersCommand } from '@aws-sdk/client-ssm';
 import { resourceFromArn } from './arn.js';
 import { collectPages } from './paging.js';
 import {
@@ -57,6 +65,9 @@ export async function listExperimentResources(input: {
     addLoadBalancers(input.clients, input.region, found),
     addEcr(input.clients, input.region, found),
     addEcs(input.clients, input.region, found),
+    addSecurityGroups(input.clients, input.region, found),
+    addSecrets(input.clients, input.region, found),
+    addParameters(input.clients, input.region, found),
     addStacks(input.clients, input.region, found),
     addBuckets(input.clients, found),
     addBudgets(input.clients, input.accountId, found, budgetNames),
@@ -572,7 +583,134 @@ async function addEcs(
         },
         tags,
       );
+      if (hasExperimentTag(tags) || nameMatchesExperiment(name)) {
+        await addTasks(clients, region, name, found);
+      }
     }
+  }
+}
+
+async function addTasks(
+  clients: TeardownClients,
+  region: string,
+  cluster: string,
+  found: Map<string, ExperimentResource>,
+): Promise<void> {
+  const taskArns = await collectPages(
+    clients.ecs,
+    (token) =>
+      new ListTasksCommand({
+        cluster,
+        desiredStatus: 'RUNNING',
+        nextToken: token,
+        maxResults: 100,
+      }),
+    (page) => ({ items: asArray(page.taskArns), token: asString(page.nextToken) }),
+  );
+  const ids = taskArns.filter((item): item is string => typeof item === 'string');
+  for (let index = 0; index < ids.length; index += 100) {
+    const batch = ids.slice(index, index + 100);
+    const page = asRecord(
+      await clients.ecs.send(new DescribeTasksCommand({ cluster, tasks: batch })),
+    );
+    for (const item of asArray(page.tasks)) {
+      const record = asRecord(item);
+      const taskArn = asString(record.taskArn);
+      const taskId = taskArn?.split('/').pop();
+      if (!taskId) {
+        continue;
+      }
+      const group = asString(record.group) ?? '';
+      const serviceName = group.startsWith('service:') ? group.slice('service:'.length) : '';
+      const name = nameMatchesExperiment(serviceName) ? serviceName : `${cluster}/${taskId}`;
+      const tags = record.tags;
+      add(found, {
+        kind: 'ecs-task',
+        name,
+        deleteRef: `${cluster}/${taskId}`,
+        region,
+        tagged: hasExperimentTag(tags),
+        owned: true,
+      });
+    }
+  }
+}
+
+async function addSecurityGroups(
+  clients: TeardownClients,
+  region: string,
+  found: Map<string, ExperimentResource>,
+): Promise<void> {
+  const groups = await collectPages(
+    clients.ec2,
+    (token) => new DescribeSecurityGroupsCommand({ NextToken: token, MaxResults: 100 }),
+    (page) => ({ items: asArray(page.SecurityGroups), token: asString(page.NextToken) }),
+  );
+  for (const item of groups) {
+    const record = asRecord(item);
+    const id = asString(record.GroupId);
+    const name = asString(record.GroupName);
+    if (!id) {
+      continue;
+    }
+    const tagged = hasExperimentTag(record.Tags);
+    const owned = tagged || nameMatchesExperiment(name) || nameMatchesExperiment(id);
+    consider(found, {
+      kind: 'security-group',
+      name: name && nameMatchesExperiment(name) ? name : id,
+      deleteRef: id,
+      region,
+      tagged,
+      owned,
+    });
+  }
+}
+
+async function addSecrets(
+  clients: TeardownClients,
+  region: string,
+  found: Map<string, ExperimentResource>,
+): Promise<void> {
+  const secrets = await collectPages(
+    clients.secretsManager,
+    (token) =>
+      new ListSecretsCommand({
+        NextToken: token,
+        MaxResults: 100,
+        IncludePlannedDeletion: true,
+      }),
+    (page) => ({ items: asArray(page.SecretList), token: asString(page.NextToken) }),
+  );
+  for (const item of secrets) {
+    const record = asRecord(item);
+    const name = asString(record.Name);
+    if (!name) {
+      continue;
+    }
+    consider(
+      found,
+      { kind: 'secret', name, deleteRef: name, region, tagged: hasExperimentTag(record.Tags) },
+      record.Tags,
+    );
+  }
+}
+
+async function addParameters(
+  clients: TeardownClients,
+  region: string,
+  found: Map<string, ExperimentResource>,
+): Promise<void> {
+  const parameters = await collectPages(
+    clients.ssm,
+    (token) => new DescribeParametersCommand({ NextToken: token, MaxResults: 50 }),
+    (page) => ({ items: asArray(page.Parameters), token: asString(page.NextToken) }),
+  );
+  for (const item of parameters) {
+    const name = asString(asRecord(item).Name);
+    if (!name) {
+      continue;
+    }
+    consider(found, { kind: 'ssm-parameter', name, deleteRef: name, region });
   }
 }
 

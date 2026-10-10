@@ -2,7 +2,7 @@
 
 [`alerts.yml`](alerts.yml) is the provider-neutral alert catalog for this experiment. Each entry is one alert. Thresholds are initial values to tune after baseline traffic.
 
-Alerts are defined in one place: Grafana, self-hosted on a small Fargate task, to avoid vendor lock-in. Data sources are CloudWatch Logs, CloudWatch metrics, and X-Ray. CloudWatch alarms are not generated. A generator produces Grafana alert-rule provisioning files from this catalog. Another engineer owns that generator. This directory does not define infrastructure.
+Alerts are defined in one place: Grafana, self-hosted on a small Fargate task, to avoid vendor lock-in. Data sources are CloudWatch Logs, CloudWatch metrics, and X-Ray. CloudWatch alarms are not generated. `infra/aws/src/grafana/provision.ts` turns this catalog into Grafana file-provisioned alert rules, data sources, and the dashboard. `infra/aws/src/grafana/receiver.ts` is the webhook that logs each state change. This directory does not define infrastructure.
 
 Nothing outside Grafana watches Grafana itself, so a Grafana outage is not alerted. That gap is deliberate because of the one-place rule.
 
@@ -35,7 +35,7 @@ Missing datapoints are not a breach for ratio (5xx and outbound error) and laten
 
 ## Grafana
 
-The workload runs in eu-central-1: shop, inventory, payment, and delivery on ECS Fargate, each with its own RDS, plus a load generator. ADOT exports metrics and logs to CloudWatch and traces to X-Ray. Grafana runs on its own small Fargate task and uses those three as data sources. A generator produces Grafana alert-rule provisioning files from this catalog:
+The workload runs in eu-central-1: shop, inventory, payment, and delivery on ECS Fargate, each with its own RDS, plus a load generator. ADOT exports metrics and logs to CloudWatch and traces to X-Ray. Grafana runs on its own small Fargate task and uses those three as data sources. `infra/aws/src/grafana/provision.ts` produces the provisioning files:
 
 | Catalog                       | Grafana alert rule                                                                             |
 | ----------------------------- | ---------------------------------------------------------------------------------------------- |
