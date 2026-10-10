@@ -1,0 +1,30 @@
+title = "otel-demo public repository secret scan"
+
+# Default gitleaks rules cover credentials (cloud keys, private keys, tokens).
+# The extra rules below block AWS account identifiers, ARNs, and IP addresses
+# so they cannot land on this public remote.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "aws-arn"
+description = "AWS Amazon Resource Name"
+regex = '''arn:(aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b):[A-Za-z0-9-]+:[A-Za-z0-9-]*:[0-9]{12}:[^\s'"\\]*'''
+keywords = ["arn:"]
+
+[[rules]]
+id = "aws-account-id-assignment"
+description = "AWS account id assignment"
+regex = '''(?i)\b(?:aws[_-]?)?account[_-]?id\b\s*[:=]\s*['"]?[0-9]{12}\b'''
+keywords = ["account"]
+
+[[rules]]
+id = "twelve-digit-identifier"
+description = "Standalone 12-digit identifier (AWS account ids are 12 digits)"
+regex = '''\b[0-9]{12}\b'''
+
+[[rules]]
+id = "ipv4-address"
+description = "IPv4 address"
+regex = '''\b(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\b'''
+keywords = ["."]
