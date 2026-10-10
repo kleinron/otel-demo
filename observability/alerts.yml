@@ -1,5 +1,6 @@
 # Provider-neutral alert catalog for the otel-demo experiment.
-# CDK in infra/aws generates cloud alarms from this file. See observability/README.md.
+# A generator produces Grafana alert-rule provisioning files from this file.
+# See observability/README.md. CloudWatch alarms are not generated.
 #
 # Thresholds are initial values to tune after baseline traffic.
 # severity: critical | warning | informational
