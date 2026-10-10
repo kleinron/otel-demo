@@ -12,6 +12,40 @@ function files(): Record<string, string> {
   return buildProvisioningFiles(readCatalog(ALERTS));
 }
 
+const CLOUDWATCH_STATISTIC =
+  /^(?:SampleCount|Average|Sum|Minimum|Maximum|IQM|p(?:100|\d{1,2}(?:\.\d+)?))$/;
+
+function cloudwatchQueries(rule: Record<string, unknown>): Record<string, unknown>[] {
+  const data = Array.isArray(rule.data) ? rule.data : [];
+  return data.flatMap((entry) => {
+    if (entry === null || typeof entry !== 'object') {
+      return [];
+    }
+    const model = (entry as { model?: unknown }).model;
+    if (model === null || typeof model !== 'object') {
+      return [];
+    }
+    const record = model as Record<string, unknown>;
+    const datasource = record.datasource;
+    const type =
+      datasource !== null && typeof datasource === 'object'
+        ? (datasource as { type?: unknown }).type
+        : undefined;
+    return type === 'cloudwatch' ? [record] : [];
+  });
+}
+
+function hasValidStatistic(model: Record<string, unknown>): boolean {
+  if (typeof model.statistic === 'string' && CLOUDWATCH_STATISTIC.test(model.statistic)) {
+    return true;
+  }
+  return (
+    Array.isArray(model.statistics) &&
+    model.statistics.length > 0 &&
+    model.statistics.every((value) => typeof value === 'string' && CLOUDWATCH_STATISTIC.test(value))
+  );
+}
+
 function rules(body: string): Record<string, unknown>[] {
   const document = parse(body) as {
     groups: { rules: Record<string, unknown>[] }[];
@@ -109,6 +143,39 @@ describe('grafana alert generator', () => {
     expect(titles).toContain('all lines for a trace id');
     expect(titles).toContain('errors by service last 15m');
     expect(provisioned['dashboards/otel-demo.json']).toContain('xray_trace_id');
+  });
+
+  it('gives every CloudWatch query in a generated rule a statistic', () => {
+    const provisioned = rules(files()['alerting/rules.yml'] ?? '');
+    expect(provisioned.length).toBeGreaterThan(0);
+    for (const rule of provisioned) {
+      const queries = cloudwatchQueries(rule);
+      expect(queries.length, String(rule.title)).toBeGreaterThan(0);
+      for (const model of queries) {
+        expect(hasValidStatistic(model), `${String(rule.title)} ${JSON.stringify(model)}`).toBe(
+          true,
+        );
+        const sql = model.sqlExpression;
+        if (typeof sql === 'string' && /\bSUM\s*\(/i.test(sql)) {
+          expect(model.statistic, String(rule.title)).toBe('Sum');
+          expect(model.metricQueryType).toBe(1);
+          expect(model.metricEditorMode).toBe(1);
+        }
+      }
+    }
+    for (const name of [
+      'cloudwatch-log-ingestion-volume',
+      'inventory-allocation-conflict-rate',
+      'inventory-out-of-stock-rate',
+    ]) {
+      const rule = provisioned.find((entry) => entry.title === name);
+      expect(rule, name).toBeDefined();
+      const queries = cloudwatchQueries(rule ?? {});
+      expect(queries.length, name).toBeGreaterThan(0);
+      for (const model of queries) {
+        expect(model.statistic, name).toBe('Sum');
+      }
+    }
   });
 });
 

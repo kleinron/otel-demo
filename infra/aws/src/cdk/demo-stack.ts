@@ -323,6 +323,7 @@ export class DemoStack extends Stack {
       taskRole,
     });
     const app = task.addContainer('app', {
+      // Tag `demo` comes from `npm run image:build` (`docker build --platform linux/arm64`).
       image: ecs.ContainerImage.fromEcrRepository(options.repository, 'demo'),
       essential: true,
       entryPoint: ['node', '/opt/fault-switch/fault-switch.cjs'],
@@ -613,6 +614,10 @@ function baseEnv(service: string): Record<string, string> {
     OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
     OTEL_DEMO_FAULTS_PARAMETER: FAULTS_PARAMETER_NAME,
     AWS_REGION: 'eu-central-1',
+    ...(process.env.LOADGEN_START_UTC ? { LOADGEN_START_UTC: process.env.LOADGEN_START_UTC } : {}),
+    ...(service === 'loadgen'
+      ? {}
+      : { OTEL_DEMO_LOAD_SCHEDULE_FILE: '/app/loadgen/schedule.json' }),
   };
 }
 

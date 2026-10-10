@@ -198,6 +198,7 @@ function ruleData(alert: CatalogAlert, rangeSeconds: number): Record<string, unk
         insightsQuery(
           'SELECT SUM(IncomingBytes) FROM SCHEMA("AWS/Logs", LogGroupName) WHERE LogGroupName LIKE \'/otel-demo/%\'',
           period,
+          'Sum',
         ),
       ),
       reduce('M', 'A'),
@@ -332,6 +333,7 @@ function metricQuery(
     return insightsQuery(
       `SELECT SUM(${quoteMetric(metricName)}) FROM SCHEMA("${METRIC_NAMESPACE}", ${dims}) WHERE service = '${alert.service}' AND operation = '${alert.operation}' GROUP BY ${alert.groupBy}`,
       period,
+      statistic,
     );
   }
   const dimensions: Record<string, string> = {};
@@ -356,14 +358,17 @@ function metricQuery(
   };
 }
 
-function insightsQuery(sql: string, period: string): Record<string, unknown> {
+function insightsQuery(sql: string, period: string, statistic: string): Record<string, unknown> {
   return {
     refId: 'A',
     region: REGION,
     queryMode: 'Metrics',
+    // Metrics Insights SQL (metricQueryType 1, code editor). Grafana still
+    // requires statistic or statistics before it will run the SQL.
     metricQueryType: 1,
     metricEditorMode: 1,
     sqlExpression: sql,
+    statistic,
     period,
   };
 }

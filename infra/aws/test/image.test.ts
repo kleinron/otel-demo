@@ -22,4 +22,41 @@ describe('service image', () => {
     const ignore = readFileSync(join(ROOT, '.dockerignore'), 'utf8');
     expect(ignore).toContain('**/*.tsbuildinfo');
   });
+
+  it('ships loadgen/schedule.json at the path services read', () => {
+    expect(dockerfile).toContain('COPY loadgen/schedule.json /app/loadgen/schedule.json');
+    expect(dockerfile).toContain('test -f /app/loadgen/schedule.json');
+    const ignore = readFileSync(join(ROOT, '.dockerignore'), 'utf8')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith('#'));
+    expect(ignore.some((line) => line.includes('schedule.json') || line === 'loadgen')).toBe(false);
+    const schedule = readFileSync(join(ROOT, 'loadgen/schedule.json'), 'utf8');
+    expect(schedule).toContain('"start"');
+  });
+
+  it('keeps the schedule in the local service images', () => {
+    for (const path of [
+      'services/shop/Dockerfile',
+      'services/inventory/Dockerfile',
+      'services/payment/Dockerfile',
+      'services/delivery/Dockerfile',
+      'loadgen/Dockerfile',
+    ]) {
+      expect(readFileSync(join(ROOT, path), 'utf8')).toContain('COPY . .');
+    }
+  });
+
+  it('requires a linux/arm64 build for the Fargate image', () => {
+    expect(dockerfile).toContain('ARG TARGETARCH');
+    expect(dockerfile).toContain('"$TARGETARCH" != "arm64"');
+    const script = readFileSync(join(ROOT, 'scripts/build-service-image.sh'), 'utf8');
+    expect(script).toContain('--platform linux/arm64');
+    expect(script).toContain('infra/aws/docker/service.Dockerfile');
+    expect(script).not.toMatch(/\d{12}/);
+    const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    expect(pkg.scripts['image:build']).toBe('bash scripts/build-service-image.sh');
+  });
 });

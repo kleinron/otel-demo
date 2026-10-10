@@ -19,7 +19,7 @@ interface Template {
   Resources: Record<string, TemplateResource>;
 }
 
-function synthesize(): Template {
+function synthesize(overrides?: Record<string, string | undefined>): Template {
   const outdir = mkdtempSync(join(tmpdir(), 'otel-demo-synth-'));
   const binary = [
     join(INFRA, 'node_modules', '.bin', 'cdk'),
@@ -28,12 +28,64 @@ function synthesize(): Template {
   if (!binary) {
     throw new Error('cdk binary was not installed');
   }
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.LOADGEN_START_UTC;
+  if (overrides) {
+    for (const [key, value] of Object.entries(overrides)) {
+      if (value === undefined) {
+        delete env[key];
+      } else {
+        env[key] = value;
+      }
+    }
+  }
   execFileSync(binary, ['synth', '--quiet', '-o', outdir], {
     cwd: INFRA,
-    env: process.env,
+    env,
     stdio: 'pipe',
   });
   return JSON.parse(readFileSync(join(outdir, 'otel-demo.template.json'), 'utf8')) as Template;
+}
+
+interface AppContainer {
+  family: string;
+  environment: { Name?: string; Value?: string }[];
+}
+
+function appContainers(template: Template): AppContainer[] {
+  return ofType(template, 'AWS::ECS::TaskDefinition').flatMap((task) => {
+    const containers = task.Properties?.ContainerDefinitions as {
+      Name?: string;
+      Environment?: { Name?: string; Value?: string }[];
+    }[];
+    return containers
+      .filter((container) => container.Name === 'app')
+      .map((container) => ({
+        family: String(task.Properties?.Family ?? ''),
+        environment: container.Environment ?? [],
+      }));
+  });
+}
+
+function otherContainers(
+  template: Template,
+): { environment: { Name?: string; Value?: string }[] }[] {
+  return ofType(template, 'AWS::ECS::TaskDefinition').flatMap((task) => {
+    const containers = task.Properties?.ContainerDefinitions as {
+      Name?: string;
+      Environment?: { Name?: string; Value?: string }[];
+    }[];
+    return containers
+      .filter((container) => container.Name !== 'app')
+      .map((container) => ({ environment: container.Environment ?? [] }));
+  });
+}
+
+function envValue(
+  environment: { Name?: string; Value?: string }[],
+  name: string,
+): string | undefined {
+  return environment.find((item) => item.Name === name)?.Value;
 }
 
 function ofType(template: Template, type: string): TemplateResource[] {
@@ -212,18 +264,63 @@ describe('cdk synth', () => {
     expect(text).toContain('otel-demo-all-lines-for-a-trace-id');
     expect(text).toContain('otel-demo-errors-by-service-last-15m');
     expect(text).toContain('"Name":"OTEL_LOG_LEVEL","Value":"error"');
-    const apps = ofType(template, 'AWS::ECS::TaskDefinition').flatMap((task) => {
-      const containers = task.Properties?.ContainerDefinitions as {
-        Name?: string;
-        Environment?: { Name?: string; Value?: string }[];
-      }[];
-      return containers.filter((container) => container.Name === 'app');
-    });
+    const apps = appContainers(template);
     expect(apps).toHaveLength(5);
     for (const app of apps) {
-      expect(app.Environment).toEqual(
+      expect(app.environment).toEqual(
         expect.arrayContaining([{ Name: 'LOG_LEVEL', Value: 'info' }]),
       );
     }
   });
+
+  it('points every service at the image schedule and leaves the experiment start on the file', () => {
+    const apps = appContainers(template);
+    expect(apps.map((app) => app.family).sort()).toEqual([
+      'otel-demo-delivery',
+      'otel-demo-inventory',
+      'otel-demo-loadgen',
+      'otel-demo-payment',
+      'otel-demo-shop',
+    ]);
+    const services = apps.filter((app) => app.family !== 'otel-demo-loadgen');
+    expect(services).toHaveLength(4);
+    for (const app of services) {
+      expect(envValue(app.environment, 'OTEL_DEMO_LOAD_SCHEDULE_FILE')).toBe(
+        '/app/loadgen/schedule.json',
+      );
+    }
+    const loadgen = apps.find((app) => app.family === 'otel-demo-loadgen');
+    expect(envValue(loadgen?.environment ?? [], 'OTEL_DEMO_LOAD_SCHEDULE_FILE')).toBeUndefined();
+    for (const app of apps) {
+      expect(envValue(app.environment, 'LOADGEN_START_UTC')).toBeUndefined();
+    }
+    expect(JSON.stringify(template)).not.toContain('LOADGEN_START_UTC');
+    for (const container of otherContainers(template)) {
+      expect(envValue(container.environment, 'OTEL_DEMO_LOAD_SCHEDULE_FILE')).toBeUndefined();
+      expect(envValue(container.environment, 'LOADGEN_START_UTC')).toBeUndefined();
+    }
+  });
+
+  it('copies LOADGEN_START_UTC from the deploy environment onto services and the load generator', () => {
+    const start = '2030-01-02T03:04:05.000Z';
+    const deployed = synthesize({ LOADGEN_START_UTC: start });
+    const apps = appContainers(deployed);
+    expect(apps).toHaveLength(5);
+    for (const app of apps) {
+      expect(envValue(app.environment, 'LOADGEN_START_UTC')).toBe(start);
+    }
+    const services = apps.filter((app) => app.family !== 'otel-demo-loadgen');
+    expect(services).toHaveLength(4);
+    for (const app of services) {
+      expect(envValue(app.environment, 'OTEL_DEMO_LOAD_SCHEDULE_FILE')).toBe(
+        '/app/loadgen/schedule.json',
+      );
+    }
+    expect(
+      envValue(
+        apps.find((app) => app.family === 'otel-demo-loadgen')?.environment ?? [],
+        'OTEL_DEMO_LOAD_SCHEDULE_FILE',
+      ),
+    ).toBeUndefined();
+  }, 60_000);
 });

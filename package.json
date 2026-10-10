@@ -26,7 +26,8 @@
     "seed": "tsx scripts/seed.ts",
     "seed:aws": "tsx scripts/seed-aws.ts",
     "loadgen:start": "tsx scripts/loadgen-scale.ts 1",
-    "loadgen:stop": "tsx scripts/loadgen-scale.ts 0"
+    "loadgen:stop": "tsx scripts/loadgen-scale.ts 0",
+    "image:build": "bash scripts/build-service-image.sh"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
