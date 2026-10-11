@@ -90,7 +90,11 @@ resource "google_secret_manager_secret" "faults" {
   labels    = local.labels
 
   replication {
-    auto {}
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
   }
 
   depends_on = [google_project_service.required]

@@ -5,19 +5,19 @@ variable "project_id" {
 
 variable "region" {
   type        = string
-  default     = "europe-west1"
-  description = "Cloud Run and Artifact Registry region. europe-west1 or me-west1."
+  default     = "me-west1"
+  description = "Region for Cloud Run, Artifact Registry, Scheduler, and the fault-switch secret. Default is me-west1 (Tel Aviv). Set europe-west1 (Belgium) as the fallback."
 
   validation {
-    condition     = contains(["europe-west1", "me-west1"], var.region)
-    error_message = "region must be europe-west1 or me-west1."
+    condition     = contains(["me-west1", "europe-west1"], var.region)
+    error_message = "region must be me-west1 (Tel Aviv) or europe-west1 (Belgium)."
   }
 }
 
 variable "scheduler_region" {
   type        = string
   default     = ""
-  description = "Cloud Scheduler region. Empty uses var.region. If me-west1 has no Cloud Scheduler, set europe-west1."
+  description = "Cloud Scheduler region. Empty uses var.region (me-west1 by default). Set europe-west1 only as a fallback if the job cannot be created in the chosen region."
 }
 
 variable "billing_account" {

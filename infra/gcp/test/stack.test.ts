@@ -49,6 +49,7 @@ describe('GCP terraform spike', () => {
     expect(text).toContain('default     = "2026-10-14T00:00:00Z"');
     expect(text).toContain('resource "google_cloud_scheduler_job" "hard_stop"');
     expect(text).toContain('manualInstanceCount = 0');
+    expect(text).toContain('default     = "me-west1"');
     expect(text).toContain('europe-west1');
     expect(text).toContain('me-west1');
     expect(hardStopCron('2026-10-14T00:00:00Z')).toBe('0 0 14 10 *');

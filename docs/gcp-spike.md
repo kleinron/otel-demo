@@ -13,7 +13,9 @@ Terraform lives in `infra/gcp/terraform`. The fault-switch selector is `@otel-de
 - A billing budget on the billing account, filtered to this project. The amount is `budget_amount_usd`, default 25 USD, with alerts at 50%, 90%, and 100%. Billing account admins receive the email. The same alerts are published to the Pub/Sub topic `otel-demo-budget-alerts`.
 - A Cloud Scheduler job that, at `hard_stop_utc` (default `2026-10-14T00:00:00Z`), patches the service so `scaling.manualInstanceCount` is 0.
 
-`region` is `europe-west1` or `me-west1`. Cloud Scheduler might not be offered in `me-west1`. Set `scheduler_region` to `europe-west1` if the job cannot be created there. The schedule is minute resolution in UTC. `2026-10-14T00:00:00Z` is cron `0 0 14 10 *`.
+`region` defaults to `me-west1` (Tel Aviv). Set it to `europe-west1` (Belgium) to place the spike there instead. `scheduler_region` follows `region` when it is empty. Set `scheduler_region` to `europe-west1` only if the Scheduler job cannot be created in the chosen region. The locations page lists Cloud Scheduler in `me-west1`, so the default job stays in Tel Aviv. The schedule is minute resolution in UTC. `2026-10-14T00:00:00Z` is cron `0 0 14 10 *`.
+
+The fault-switch secret uses user-managed replication in `region`, so its versions are stored in Tel Aviv unless you override the region.
 
 ## Before apply
 
@@ -44,7 +46,7 @@ The service command is `node services/shop/dist/index.js`. It does not use the A
 `shop_image` must be an image Cloud Run can run, pushed to Artifact Registry before apply:
 
 ```bash
-gcloud auth configure-docker europe-west1-docker.pkg.dev
+gcloud auth configure-docker me-west1-docker.pkg.dev
 docker build --platform linux/amd64 -f infra/aws/docker/service.Dockerfile -t "$SHOP_IMAGE" .
 docker push "$SHOP_IMAGE"
 ```
@@ -146,12 +148,34 @@ rm -f "$KEY_FILE"
 - Do not put the key contents in a shell history you share, a log, or a pull request. `gitleaks` runs on pull requests and rejects private keys, AWS account ids, and IP addresses.
 - Application Default Credentials from `gcloud auth application-default login` are stored outside the repo. Revoke them with `gcloud auth application-default revoke` when you are finished.
 
+## Region check (me-west1)
+
+Checked against the Google Cloud locations pages on 2026-10-11. `me-west1` is Tel Aviv.
+
+| Product                            | In me-west1                                                                                                                                                                                                            | Source                                                                                          |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Cloud Run                          | Listed, Tier 1 pricing                                                                                                                                                                                                 | https://cloud.google.com/run/docs/locations                                                     |
+| Cloud Run multi-container sidecars | No separate location table. The deploying guide documents sidecars as a service feature and lists `me-west1` as a Cloud Run region. Release notes mark service sidecars generally available, with no region exclusion. | https://cloud.google.com/run/docs/deploying and https://cloud.google.com/run/docs/release-notes |
+| Artifact Registry                  | Listed (`me-west1`, Tel Aviv)                                                                                                                                                                                          | https://cloud.google.com/artifact-registry/docs/repositories/repo-locations                     |
+| Cloud Scheduler                    | Listed under Middle East (`me-west1`, Tel Aviv)                                                                                                                                                                        | https://cloud.google.com/scheduler/docs/locations                                               |
+| Secret Manager                     | Regional Secret Manager: Yes for `me-west1` (Tel Aviv)                                                                                                                                                                 | https://cloud.google.com/secret-manager/docs/locations                                          |
+| Cloud Trace storage                | Observability buckets include `me-west1` (Tel Aviv). The page says those buckets store data from services such as Cloud Trace.                                                                                         | https://cloud.google.com/stackdriver/docs/observability/observability-bucket-locations          |
+| Cloud Logging storage              | Log bucket locations include `me-west1` (Tel Aviv)                                                                                                                                                                     | https://cloud.google.com/logging/docs/region-support                                            |
+| Cloud SQL for PostgreSQL           | Listed under Middle East (`me-west1`, Tel Aviv)                                                                                                                                                                        | https://cloud.google.com/sql/docs/postgres/locations                                            |
+
+Gaps:
+
+- There is no locations page that says sidecar support region by region. Sidecar support in `me-west1` is inferred from Cloud Run being available there and from sidecars being a general feature of a Cloud Run service.
+- This stack does not create a Cloud SQL instance. The locations page is the availability check only.
+- Cloud Run stdout is ingested by the Logging API. New `_Default` and `_Required` buckets are in `global` unless the organization sets another default (https://cloud.google.com/logging/docs/regionalized-logs). This terraform does not create a `me-west1` log bucket or a sink, so log storage is not forced into Tel Aviv.
+- The collector sends traces to the Cloud Trace API. It does not set an observability-bucket location. Unless the project default for observability buckets is `me-west1`, trace storage may be somewhere else. https://cloud.google.com/trace/docs/storage-overview
+- The fault-switch secret is user-managed in `region`. A `database_secret` you create outside terraform is stored wherever that secret's replication policy says.
+
 ## Assumptions to verify
 
-- Cloud Run accepts two containers in one service (the sidecar) in `europe-west1` and `me-west1`, and `cpu_idle = false` keeps CPU allocated for both.
+- `cpu_idle = false` keeps CPU allocated for both containers in `me-west1`. The locations pages do not mention that setting.
 - `otel/opentelemetry-collector-contrib:0.128.0` still contains the `googlecloud` exporter and still accepts `--config=env:OTEL_COLLECTOR_CONFIG`.
-- Cloud Scheduler can `PATCH` the Cloud Run Admin API with `updateMask=scaling.manualInstanceCount` and a body of `{ "scaling": { "manualInstanceCount": 0 } }`, and that scales the service to zero. The hard-stop service account has `roles/run.developer` and the Scheduler service agent can mint its token.
-- Cloud Scheduler exists in the region you set. `me-west1` may require `scheduler_region = "europe-west1"`.
+- Cloud Scheduler can `PATCH` the Cloud Run Admin API with `updateMask=scaling.manualInstanceCount` and a body of `{ "scaling": { "manualInstanceCount": 0 } }`, and that scales the service to zero. The hard-stop service account has `roles/run.developer` and the Scheduler service agent can mint its token. The locations page lists the service in `me-west1`; it does not document this API call.
 - The shop image's architecture matches Cloud Run. The AWS Dockerfile only builds `linux/arm64`.
 - A useful log line needs `DATABASE_URL` in Secret Manager (`database_secret`). This terraform does not create a database.
 - `roles/run.developer` is enough for the hard-stop account to patch scaling. If the API returns a permission error, the account needs `roles/run.admin` instead.
