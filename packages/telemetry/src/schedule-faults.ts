@@ -24,6 +24,8 @@ import {
 
 export interface WindowedFaultControllerOptions {
   plan: LoadPlan;
+  /** When set, only this service's spike windows are armed and logged. */
+  service?: string;
   reader: FaultSwitchReader;
   log?: FaultControlLog;
   wallClock?: () => number;
@@ -53,7 +55,7 @@ export function createWindowedFaultController(
   const lastKnownTtlMs = options.lastKnownTtlMs ?? DEFAULT_FAULT_LAST_KNOWN_MS;
   const failureLimit = options.failureLimit ?? DEFAULT_FAULT_FAILURE_LIMIT;
   const pollIntervalMs = clampPollInterval(options.pollIntervalMs ?? DEFAULT_FAULT_POLL_MS);
-  const faults = faultSpecs(options.plan);
+  const faults = faultSpecs(options.plan, options.service);
   let enabled = false;
   let enabledAtMs: number | undefined;
   let consecutiveFailures = 0;
@@ -179,8 +181,13 @@ export function loadPlanFromEnv(env: Record<string, string | undefined>): LoadPl
   if (!file) {
     return undefined;
   }
-  const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown;
-  return buildPlan(applyRuntimeOverrides(parseLoadSchedule(parsed), env));
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    return buildPlan(applyRuntimeOverrides(parseLoadSchedule(parsed), env));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'unreadable';
+    throw new Error(`fault schedule ${file} is unreadable: ${reason}`, { cause: error });
+  }
 }
 
 /**
@@ -195,12 +202,49 @@ export async function startScheduledFaultControl(
   if (!plan) {
     return startSingleWindow(env, log);
   }
+  return openWindowed(plan, env, log);
+}
+
+/**
+ * Arm the load-schedule windows for one service. Shop does not inject inventory
+ * or payment faults, and a missing schedule file fails startup instead of
+ * silently falling back to an empty single-window list.
+ */
+export async function startServiceFaultControl(
+  service: string,
+  env: Record<string, string | undefined>,
+  log?: FaultControlLog,
+): Promise<FaultController> {
+  const file = env.OTEL_DEMO_LOAD_SCHEDULE_FILE?.trim();
+  if (!file) {
+    return startSingleWindow(env, log);
+  }
+  const plan = loadPlanFromEnv(env);
+  if (!plan) {
+    throw new Error(`fault schedule ${file} is unreadable`);
+  }
+  const controller = await openWindowed(plan, env, log, service);
+  log?.info('fault schedule loaded', {
+    service,
+    schedule: file,
+    operations: serviceOperations(plan, service),
+  });
+  return controller;
+}
+
+async function openWindowed(
+  plan: LoadPlan,
+  env: Record<string, string | undefined>,
+  log: FaultControlLog | undefined,
+  service?: string,
+): Promise<FaultController> {
   const reader = await createFaultSwitchReader(env);
   const pollRaw = env.FAULT_SWITCH_POLL_MS
     ? Number(env.FAULT_SWITCH_POLL_MS)
     : DEFAULT_FAULT_POLL_MS;
   const controller = createWindowedFaultController({
     plan,
+    service,
     reader,
     log,
     pollIntervalMs: pollRaw,
@@ -240,14 +284,22 @@ export function databaseFaultHook(
   };
 }
 
-function faultSpecs(plan: LoadPlan): ResolvedFault[] {
+function faultSpecs(plan: LoadPlan, service?: string): ResolvedFault[] {
   const specs: ResolvedFault[] = [];
   for (const spike of plan.spikes) {
-    if (spike.fault) {
-      specs.push(spike.fault);
+    if (!spike.fault) {
+      continue;
     }
+    if (service !== undefined && spike.fault.service !== service) {
+      continue;
+    }
+    specs.push(spike.fault);
   }
   return specs;
+}
+
+function serviceOperations(plan: LoadPlan, service: string): string[] {
+  return [...new Set(faultSpecs(plan, service).map((fault) => fault.operation))].sort();
 }
 
 function toSpec(fault: ResolvedFault): FaultSpec {

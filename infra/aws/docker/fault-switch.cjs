@@ -1,7 +1,8 @@
 'use strict';
 
-const { SSMClient, GetParameterCommand } = require('@aws-sdk/client-ssm');
 const { spawn } = require('node:child_process');
+
+const DEFAULT_PARAMETER = '/otel-demo/faults-enabled';
 
 // ECS injects DB_HOST, DB_PORT, DB_NAME, DB_USER and DB_PASSWORD (the password comes from
 // Secrets Manager). The services read one DATABASE_URL, so build it here, in memory only.
@@ -16,20 +17,70 @@ function buildDatabaseUrl(env) {
   env.DATABASE_URL = `postgres://${user}:${password}@${env.DB_HOST}:${port}/${env.DB_NAME}?sslmode=no-verify`;
 }
 
+function parameterName(env) {
+  const named = (env.FAULT_SWITCH_SSM_PARAMETER || env.OTEL_DEMO_FAULTS_PARAMETER || '').trim();
+  return named || DEFAULT_PARAMETER;
+}
+
+/**
+ * Polled by the service when FAULT_SWITCH_SOURCE=module. A one-shot read in this
+ * process would freeze the kill switch at task start, so the service calls read()
+ * on its own interval. `client` is optional and exists for tests.
+ */
+function createFaultSwitch(env, client) {
+  const source = env || process.env;
+  const name = parameterName(source);
+  let cached = client;
+  return {
+    async read() {
+      const sender = cached || (cached = createClient(source));
+      const response = await sender.send(getParameter(name));
+      const value = response && response.Parameter ? response.Parameter.Value : undefined;
+      if (value === undefined || String(value).trim() === '') {
+        throw new Error('ssm parameter has no value');
+      }
+      return parseSwitch(String(value));
+    },
+  };
+}
+
+function getParameter(name) {
+  const { GetParameterCommand } = require('@aws-sdk/client-ssm');
+  return new GetParameterCommand({ Name: name });
+}
+
+function createClient(env) {
+  const { SSMClient } = require('@aws-sdk/client-ssm');
+  const region = (env.AWS_REGION || env.AWS_DEFAULT_REGION || '').trim();
+  if (!region) {
+    throw new Error('AWS region is not set');
+  }
+  return new SSMClient({ region });
+}
+
+function parseSwitch(value) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1' || normalized === 'on') {
+    return true;
+  }
+  if (normalized === 'false' || normalized === '0' || normalized === 'off') {
+    return false;
+  }
+  throw new Error('fault switch value is unreadable');
+}
+
 async function main() {
   buildDatabaseUrl(process.env);
-  const name = process.env.OTEL_DEMO_FAULTS_PARAMETER;
-  if (!name) {
-    throw new Error('OTEL_DEMO_FAULTS_PARAMETER is not set');
+  // Env-switch fallback for a task that has not set FAULT_SWITCH_SOURCE=module.
+  // A module task polls SSM itself, so a later change to the parameter is seen.
+  try {
+    const enabled = await createFaultSwitch(process.env).read();
+    process.env.OTEL_DEMO_FAULTS_ENABLED = enabled ? 'true' : 'off';
+  } catch (error) {
+    process.stderr.write(
+      `fault switch startup read failed: ${error instanceof Error ? error.message : 'unreadable'}\n`,
+    );
   }
-  const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
-  const client = new SSMClient({ region });
-  const result = await client.send(new GetParameterCommand({ Name: name }));
-  const value = String(result.Parameter && result.Parameter.Value ? result.Parameter.Value : 'off')
-    .trim()
-    .toLowerCase();
-  const enabled = value === 'true' || value === '1' || value === 'on';
-  process.env.OTEL_DEMO_FAULTS_ENABLED = enabled ? 'true' : 'off';
   const command = process.argv[2];
   if (!command) {
     throw new Error('fault switch needs a command');
@@ -45,4 +96,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildDatabaseUrl };
+module.exports = { buildDatabaseUrl, createFaultSwitch };

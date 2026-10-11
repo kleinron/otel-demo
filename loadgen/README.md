@@ -13,7 +13,7 @@ Customers are the 1000 seeded ids `cust-0000` through `cust-0999`.
 | checkout     | new cart, add items, `POST /carts/:cartId/checkout`, `GET /orders/:orderId` |
 | order status | `GET /orders/:orderId` for an order this process has checked out            |
 
-About 15% of checkouts ask for two `powerbank-dead-sea` units. That SKU has one unit on hand, so those attempts are out of stock.
+About 15% of checkouts ask for two `powerbank-dead-sea` units. That SKU has one unit on hand, so those attempts are out of stock. The other SKUs are seeded with 700 units in each warehouse so the ~3,000 checkouts a day, with spike multipliers, fit in the 72-hour run. `npm run restock:aws` restores that available stock without deleting orders.
 
 The curve targets about 100k cart activities and 3k checkouts per day, plus browse and order-status traffic, shaped by the hour in `Asia/Jerusalem`. Spike minutes sit on top of that curve.
 
@@ -44,7 +44,7 @@ npm run build
 SHOP_URL=http://localhost:3001 npm run start -w @otel-demo/loadgen
 ```
 
-`docker compose --profile load up --build` starts the generator next to the shop. Faults stay off until `OTEL_DEMO_FAULTS_ENABLED=true`. The services read the same `schedule.json` and apply whatever window is open, polling the kill switch the same way as a single-window schedule.
+`docker compose --profile load up --build` starts the generator next to the shop. Faults stay off until `OTEL_DEMO_FAULTS_ENABLED=true`. The services read the same `schedule.json` and each one applies the open windows for its own operations, polling the kill switch the same way as a single-window schedule.
 
 Each start logs `runner started` with `at` (UTC) and `seed`. Every request is one JSON line: `flowId`, `timestamp` (UTC), `operation`, `status`, `latencyMs`. Spike, warm-up, and fault markers use `spike start`, `spike end`, `warmup start`, `warmup end`, `fault window start`, and `fault window end`, with `at` set to the scheduled UTC boundary. A process that wakes up inside a window does not emit that window's start again.
 

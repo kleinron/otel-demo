@@ -208,11 +208,15 @@ export async function createFaultSwitchReader(
     }
     const imported = (await import(specifier)) as {
       createFaultSwitch?: (sourceEnv: Record<string, string | undefined>) => FaultSwitchReader;
+      default?: {
+        createFaultSwitch?: (sourceEnv: Record<string, string | undefined>) => FaultSwitchReader;
+      };
     };
-    if (typeof imported.createFaultSwitch !== 'function') {
+    const createFaultSwitch = imported.createFaultSwitch ?? imported.default?.createFaultSwitch;
+    if (typeof createFaultSwitch !== 'function') {
       throw new Error('fault switch module must export createFaultSwitch');
     }
-    return imported.createFaultSwitch(env);
+    return createFaultSwitch(env);
   }
   if (source === 'ssm') {
     throw new Error(

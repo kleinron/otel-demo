@@ -43,12 +43,23 @@ export const WAREHOUSES: readonly Warehouse[] = [
   { id: 'wh-tlv', city: 'Tel Aviv' },
 ];
 
+/**
+ * On-hand units of one regular SKU in one warehouse.
+ *
+ * The checked-in load plan is about 3,000 checkouts a day for 72 hours, plus
+ * spike multipliers (about 10,700 checkouts). Fifteen percent ask only for the
+ * scarce power bank. The rest take one of eight regular SKUs, and 40 percent
+ * add a second, which is about 1,530 units of each regular SKU. 700 in each of
+ * the three warehouses is 2,100, enough for that run with margin.
+ */
+export const REGULAR_UNITS_PER_WAREHOUSE = 700;
+
 /** Deterministic on-hand quantity. The Dead Sea power bank is scarce on purpose. */
 export function stockOnHand(sku: string, warehouseId: string): number {
   if (sku === 'powerbank-dead-sea') {
     return warehouseId === 'wh-tlv' ? 1 : 0;
   }
-  return 40;
+  return REGULAR_UNITS_PER_WAREHOUSE;
 }
 
 export function skuById(sku: string): CatalogSku | undefined {

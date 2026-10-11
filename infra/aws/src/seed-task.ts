@@ -29,6 +29,17 @@ export const AWS_SEED_TARGETS: readonly SeedTarget[] = [
   },
 ];
 
+/**
+ * Top up inventory on the deployed task definition. Shop is not included:
+ * seeding shop drops orders.
+ */
+export const AWS_RESTOCK_TARGETS: readonly SeedTarget[] = [
+  {
+    serviceName: 'otel-demo-inventory',
+    command: ['node', 'services/inventory/dist/restock-main.js'],
+  },
+];
+
 const APP_CONTAINER = 'app';
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_POLL_MS = 5_000;
@@ -42,6 +53,7 @@ export interface SeedRunOptions {
   timeoutMs?: number;
   pollMs?: number;
   onSeeded?: (serviceName: string) => void;
+  startedBy?: string;
 }
 
 /** Run shop and inventory seed as one-off tasks from the deployed task definitions. */
@@ -55,7 +67,16 @@ export async function seedDeployedServices(options: SeedRunOptions): Promise<voi
   const failures: string[] = [];
   for (const target of targets) {
     try {
-      await runSeedTask({ ecs: options.ecs, cluster, target, sleep, now, timeoutMs, pollMs });
+      await runSeedTask({
+        ecs: options.ecs,
+        cluster,
+        target,
+        sleep,
+        now,
+        timeoutMs,
+        pollMs,
+        startedBy: options.startedBy ?? 'otel-demo-seed',
+      });
       options.onSeeded?.(target.serviceName);
     } catch (error) {
       failures.push(redactText(error instanceof Error ? error.message : String(error)));
@@ -66,6 +87,15 @@ export async function seedDeployedServices(options: SeedRunOptions): Promise<voi
   }
 }
 
+/** One-off inventory restock. Does not run the shop seed, which drops orders. */
+export async function restockDeployedInventory(options: SeedRunOptions): Promise<void> {
+  await seedDeployedServices({
+    ...options,
+    targets: options.targets ?? AWS_RESTOCK_TARGETS,
+    startedBy: options.startedBy ?? 'otel-demo-restock',
+  });
+}
+
 async function runSeedTask(input: {
   ecs: SdkClient;
   cluster: string;
@@ -74,6 +104,7 @@ async function runSeedTask(input: {
   now: () => number;
   timeoutMs: number;
   pollMs: number;
+  startedBy: string;
 }): Promise<void> {
   const described = asRecord(
     await input.ecs.send(
@@ -96,7 +127,7 @@ async function runSeedTask(input: {
         taskDefinition,
         launchType: 'FARGATE',
         count: 1,
-        startedBy: 'otel-demo-seed',
+        startedBy: input.startedBy,
         propagateTags: 'TASK_DEFINITION',
         networkConfiguration: { awsvpcConfiguration: network },
         overrides: {
@@ -130,10 +161,10 @@ async function runSeedTask(input: {
     }
     if (!askedToStop && containerExit(task, APP_CONTAINER) !== undefined) {
       askedToStop = true;
-      await stopTask(input.ecs, input.cluster, taskArn);
+      await stopTask(input.ecs, input.cluster, taskArn, input.startedBy);
     }
     if (input.now() >= deadline) {
-      await stopTask(input.ecs, input.cluster, taskArn);
+      await stopTask(input.ecs, input.cluster, taskArn, input.startedBy);
       throw new Error(`${input.target.serviceName} seed task did not finish`);
     }
     await input.sleep(input.pollMs);
@@ -195,9 +226,14 @@ function containerExit(task: Record<string, unknown>, name: string): number | un
   return typeof container?.exitCode === 'number' ? container.exitCode : undefined;
 }
 
-async function stopTask(ecs: SdkClient, cluster: string, task: string): Promise<void> {
+async function stopTask(
+  ecs: SdkClient,
+  cluster: string,
+  task: string,
+  startedBy: string,
+): Promise<void> {
   try {
-    await ecs.send(new StopTaskCommand({ cluster, task, reason: 'otel-demo seed finished' }));
+    await ecs.send(new StopTaskCommand({ cluster, task, reason: `${startedBy} finished` }));
   } catch {
     // The task may already be stopped. The app exit code is the result that matters.
   }

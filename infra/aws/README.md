@@ -18,7 +18,7 @@ The Budgets alert named `otel-demo-experiment` is allow-listed by that exact nam
 
 ## Fault kill switch
 
-Application services do not import the AWS SDK. When a task must poll SSM, set `FAULT_SWITCH_SOURCE=module` and `FAULT_SWITCH_MODULE=@otel-demo/infra-aws/fault-switch`. `createFaultSwitch` reads the parameter `/otel-demo/faults-enabled` unless `FAULT_SWITCH_SSM_PARAMETER` overrides it. This package does not create that parameter.
+Application services do not import the AWS SDK. When a task must poll SSM, set `FAULT_SWITCH_SOURCE=module` and `FAULT_SWITCH_MODULE` to a module that exports `createFaultSwitch`. The image module is `/opt/fault-switch/fault-switch.cjs`. Outside the image the same reader is `@otel-demo/infra-aws/fault-switch`. The parameter name is `FAULT_SWITCH_SSM_PARAMETER`, then `OTEL_DEMO_FAULTS_PARAMETER`, then `/otel-demo/faults-enabled`. This package does not create that parameter. The service polls it. A value captured only at process start would stay stale after the parameter changes.
 
 ## Commands
 
@@ -31,6 +31,7 @@ npm run teardown -- --region eu-central-1
 npm run deploy:check
 npm run synth -w @otel-demo/infra-aws
 npm run seed:aws
+npm run restock:aws
 npm run loadgen:start
 npm run loadgen:stop
 ```
@@ -61,7 +62,7 @@ The stack in `src/cdk` uses:
 
 Verify also lists security groups (including the Grafana task group), running ECS tasks (including Grafana), Secrets Manager secrets (including the Grafana admin password), and the SSM faults parameter, and deletes any of those that remain. Deploy with `--region eu-central-1`. Synth does not call AWS.
 
-`npm run seed:aws` is required after the first deploy. It runs shop and inventory seeding as one-off Fargate tasks from the deployed task definitions. Payment and delivery migrate when their service tasks start. `npm run loadgen:start` and `npm run loadgen:stop` set the `otel-demo-loadgen` desired count to 1 and 0. The stack creates that service at 0. A later deploy can roll a generator that is already running. Image platform, `LOADGEN_START_UTC`, and the `/otel-demo/faults-enabled` kill switch are in the run section of the [root README](../../README.md).
+`npm run seed:aws` is required after the first deploy. It runs shop and inventory seeding as one-off Fargate tasks from the deployed task definitions. Payment and delivery migrate when their service tasks start. Seed drops shop orders and inventory reservations. `npm run restock:aws` runs only the inventory restock program, which sets available stock back to the seed target and leaves reservations in place. `npm run loadgen:start` and `npm run loadgen:stop` set the `otel-demo-loadgen` desired count to 1 and 0. The stack creates that service at 0. A later deploy can roll a generator that is already running. Image platform, `LOADGEN_START_UTC`, and the `/otel-demo/faults-enabled` kill switch are in the run section of the [root README](../../README.md).
 
 `npm run grafana:url` prints the Grafana task's current public address. The security group starts with no inbound rules; add your address on port 3000 after every deploy.
 

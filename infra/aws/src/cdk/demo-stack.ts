@@ -617,7 +617,12 @@ function baseEnv(service: string): Record<string, string> {
     ...(process.env.LOADGEN_START_UTC ? { LOADGEN_START_UTC: process.env.LOADGEN_START_UTC } : {}),
     ...(service === 'loadgen'
       ? {}
-      : { OTEL_DEMO_LOAD_SCHEDULE_FILE: '/app/loadgen/schedule.json' }),
+      : {
+          OTEL_DEMO_LOAD_SCHEDULE_FILE: '/app/loadgen/schedule.json',
+          // Poll SSM. A startup snapshot of OTEL_DEMO_FAULTS_ENABLED stays stale after the parameter flips.
+          FAULT_SWITCH_SOURCE: 'module',
+          FAULT_SWITCH_MODULE: '/opt/fault-switch/fault-switch.cjs',
+        }),
   };
 }
 
