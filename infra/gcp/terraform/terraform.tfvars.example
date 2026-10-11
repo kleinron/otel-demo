@@ -1,0 +1,6 @@
+project_id      = "your-project-id"
+region          = "europe-west1"
+billing_account = "XXXXXX-XXXXXX-XXXXXX"
+budget_amount_usd = 25
+hard_stop_utc   = "2026-10-14T00:00:00Z"
+shop_image      = "europe-west1-docker.pkg.dev/your-project-id/otel-demo/shop:spike"

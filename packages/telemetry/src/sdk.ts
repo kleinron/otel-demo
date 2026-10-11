@@ -5,6 +5,7 @@ import { defaultResource, resourceFromAttributes } from '@opentelemetry/resource
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { NodeSDK, type NodeSDKConfiguration } from '@opentelemetry/sdk-node';
 import { resolveTelemetryConfig, type TelemetryConfig, type TelemetryOptions } from './config.js';
+import { createTraceIdGenerator } from './ids.js';
 import { httpServerDurationView } from './metrics.js';
 import { createTracePropagator } from './propagate.js';
 
@@ -23,6 +24,9 @@ export interface StartTelemetryOptions extends TelemetryOptions {
  * Build the Node SDK configuration: OTLP/HTTP exporters, W3C traceparent,
  * and explicit resource attributes. Host resource detection is off so a
  * machine address is not attached automatically.
+ *
+ * Trace ids follow `CLOUD_PROVIDER`. The default `aws` generator is the
+ * X-Ray form (unix seconds plus random). `gcp` is 16 random bytes.
  */
 export function buildNodeSdkConfiguration(config: TelemetryConfig): Partial<NodeSDKConfiguration> {
   return {
@@ -31,6 +35,7 @@ export function buildNodeSdkConfiguration(config: TelemetryConfig): Partial<Node
     autoDetectResources: false,
     instrumentations: [],
     textMapPropagator: createTracePropagator(),
+    idGenerator: createTraceIdGenerator(config.cloudProvider),
     traceExporter: new OTLPTraceExporter({
       url: config.tracesUrl,
       headers: config.tracesHeaders,

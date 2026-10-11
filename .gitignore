@@ -15,3 +15,13 @@ coverage/
 cdk.out/
 .aws/
 *.pem
+
+# Terraform local state and filled variable files. The example tfvars is safe to commit.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+*-sa-key.json
+gcp-key.json

@@ -11,7 +11,19 @@ export {
   withCustomerHash,
   withOrderId,
 } from './context.js';
+export {
+  GCP_SPAN_ID_FIELD,
+  GCP_TRACE_FIELD,
+  GCP_TRACE_SAMPLED_FIELD,
+  gcpTraceField,
+  resolveCloudProvider,
+  resolveGcpProjectId,
+  resolveLogFormat,
+  type CloudProvider,
+  type LogFormat,
+} from './cloud.js';
 export { resolveTelemetryConfig, type TelemetryConfig, type TelemetryOptions } from './config.js';
+export { createTraceIdGenerator, type CloudIdGenerator, type IdGeneratorOptions } from './ids.js';
 export {
   FAULT_CONFIGURED_ATTRIBUTE,
   FAULT_ID_ATTRIBUTE,

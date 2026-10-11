@@ -9,6 +9,7 @@
     { "path": "services/payment" },
     { "path": "services/delivery" },
     { "path": "loadgen" },
-    { "path": "infra/aws" }
+    { "path": "infra/aws" },
+    { "path": "infra/gcp" }
   ]
 }

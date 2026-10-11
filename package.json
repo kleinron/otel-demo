@@ -11,7 +11,8 @@
     "packages/*",
     "services/*",
     "loadgen",
-    "infra/aws"
+    "infra/aws",
+    "infra/gcp"
   ],
   "scripts": {
     "build": "tsc -b",

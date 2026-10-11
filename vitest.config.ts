@@ -11,6 +11,9 @@ export default defineConfig({
       '@otel-demo/httpkit': fileURLToPath(
         new URL('./packages/httpkit/src/index.ts', import.meta.url),
       ),
+      '@otel-demo/infra-aws/fault-switch': fileURLToPath(
+        new URL('./infra/aws/src/fault-switch.ts', import.meta.url),
+      ),
     },
   },
   test: {

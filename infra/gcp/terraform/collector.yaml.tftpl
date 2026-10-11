@@ -1,0 +1,24 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: localhost:4318
+processors:
+  batch:
+    timeout: 5s
+exporters:
+  googlecloud:
+    project: ${project_id}
+extensions:
+  health_check:
+    endpoint: localhost:13133
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [googlecloud]
+  telemetry:
+    logs:
+      level: error
