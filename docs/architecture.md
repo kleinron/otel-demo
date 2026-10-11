@@ -29,7 +29,7 @@ Calls are synchronous HTTP. A mutating call carries an idempotency key, and that
 
 An inventory reserve that cannot be filled is a business outcome: HTTP 409, out of stock. That response is not a server error. The checkout trace is still marked with error status so the failed order is visible. Stock is allocated from warehouses in stable warehouse-id order and written only in the inventory database.
 
-Reference data is loaded by `npm run seed`: 1000 deterministic customers (English and Hebrew names, Israeli cities, `+972` phone numbers with separators) in the shop database, and the smartphone, headphone, power bank, and laptop catalog with warehouse stock in the inventory database. Seed drops the service tables first, so a partially filled database is rebuilt.
+Reference data is loaded by `npm run seed`: 1000 deterministic customers (English and Hebrew names, Israeli cities, `+972` phone numbers with separators) in the shop database, and the smartphone, headphone, power bank, and laptop catalog with warehouse stock in the inventory database. Seed drops the service tables first, so a partially filled database is rebuilt. Regular SKUs are seeded with 700 units in each of the three warehouses, which covers the 72-hour checkout profile. `powerbank-dead-sea` stays at one unit in Tel Aviv. `npm run restock` (and `npm run restock:aws`) sets available stock back to those targets without dropping reservations or shop orders.
 
 ## Configuration
 
@@ -37,7 +37,7 @@ Process configuration comes from environment variables. Provider-specific code i
 
 The demo runs in eu-central-1. Tasks are small public Fargate tasks so they can reach ECR and CloudWatch without a NAT gateway. Databases sit on isolated subnets. Shop traffic from the load generator uses an internal load balancer. An ADOT sidecar on each task sends OTLP to CloudWatch metrics, X-Ray, and CloudWatch Logs. Every trace is exported. A sidecar decision cannot keep one checkout trace whole across shop, inventory, payment, and delivery, so the collector config has no tail sampling and keeps 100% of spans. X-Ray at about 1 million traces is a few dollars. Grafana is one more small task, plain HTTP on port 3000, with a security group that starts with no inbound rules. Plain HTTP is acceptable for this throwaway demo. The admin password is only in Secrets Manager and is not used anywhere else. Alerts exist only as Grafana rules generated from `observability/alerts.yml`. Database backups are off.
 
-The load generator service is created with desired count 0. Shop and inventory reference data is loaded after deploy by `npm run seed:aws`. Payment and delivery migrate when their tasks start.
+The load generator service is created with desired count 0. Shop and inventory reference data is loaded after deploy by `npm run seed:aws`. Payment and delivery migrate when their tasks start. During a run, `npm run restock:aws` tops up inventory on the deployed inventory task. It does not run the shop seed.
 
 ## Load
 

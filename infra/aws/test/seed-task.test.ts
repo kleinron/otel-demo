@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { AWS_SEED_TARGETS, seedDeployedServices } from '../src/seed-task.js';
+import {
+  AWS_RESTOCK_TARGETS,
+  AWS_SEED_TARGETS,
+  restockDeployedInventory,
+  seedDeployedServices,
+} from '../src/seed-task.js';
 import { recordingClient } from './aws-mock.js';
 
 const NETWORK = {
@@ -197,5 +202,35 @@ describe('aws seed tasks', () => {
       }),
     ).rejects.toThrow(/no task network/);
     expect(noNetwork.calls.some((call) => call.name === 'RunTaskCommand')).toBe(false);
+  });
+
+  it('restocks inventory only and does not run the shop seed', async () => {
+    const ecs = recordingClient({
+      DescribeServicesCommand: servicePage,
+      RunTaskCommand: () => ({ tasks: [{ taskArn: 'task/otel-demo/restock-inventory' }] }),
+      DescribeTasksCommand: () => stoppedTask(0),
+    });
+    const restocked: string[] = [];
+    await restockDeployedInventory({
+      ecs: ecs.client,
+      sleep: async () => {},
+      now: () => 0,
+      onSeeded(serviceName) {
+        restocked.push(serviceName);
+      },
+    });
+    expect(restocked).toEqual(['otel-demo-inventory']);
+    expect(AWS_RESTOCK_TARGETS.map((target) => target.serviceName)).toEqual(restocked);
+    const run = ecs.calls.find((call) => call.name === 'RunTaskCommand');
+    expect(run?.input).toMatchObject({
+      startedBy: 'otel-demo-restock',
+      overrides: {
+        containerOverrides: [
+          { name: 'app', command: ['node', 'services/inventory/dist/restock-main.js'] },
+        ],
+      },
+    });
+    expect(JSON.stringify(ecs.calls)).not.toContain('seed-main.js');
+    expect(JSON.stringify(ecs.calls)).not.toContain('otel-demo-shop');
   });
 });

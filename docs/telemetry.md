@@ -91,19 +91,19 @@ HTTP 409 from inventory is `outcome=success` on the outbound counter because the
 
 Faults are delay, error, drop, or timeout on a named operation (`reserve`, `charge`, `capture`, `handoff`, `checkout`, and the other route operations). The schedule is read once at startup. The kill switch is polled every 5–10 seconds (default 7.5s).
 
-| Variable                        | Role                                                                                                                    |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `OTEL_DEMO_FAULTS`              | JSON array. Each object has `id`, `type`, and optional `service`, `operation`, `probability`, and `delayMs`.            |
-| `OTEL_DEMO_FAULT_SCHEDULE`      | JSON object `{ windowStart, windowEnd, faults }`. Window timestamps are ISO-8601 UTC.                                   |
-| `OTEL_DEMO_FAULT_SCHEDULE_FILE` | Path to that object. Read once at startup.                                                                              |
-| `OTEL_DEMO_FAULT_WINDOW_START`  | Window start when the schedule is the `OTEL_DEMO_FAULTS` array.                                                         |
-| `OTEL_DEMO_FAULT_WINDOW_END`    | Window end. Faults stop at this instant. The process logs `fault window end` with `at` in UTC.                          |
-| `OTEL_DEMO_FAULTS_ENABLED`      | Env kill switch when `FAULT_SWITCH_SOURCE=env` (the default). `true`, `1`, or `on` enables the loaded schedule.         |
-| `FAULT_SWITCH_SOURCE`           | `env`, `file`, or `module`. `ssm` is rejected in application code.                                                      |
-| `FAULT_SWITCH_FILE`             | File polled when the source is `file`. Contents are `on` or `off`.                                                      |
-| `FAULT_SWITCH_MODULE`           | Module specifier that exports `createFaultSwitch`. On AWS this is `@otel-demo/infra-aws/fault-switch`, which reads SSM. |
-| `FAULT_SWITCH_SSM_PARAMETER`    | Read by the infra module. Default `/otel-demo/faults-enabled`.                                                          |
-| `FAULT_SWITCH_POLL_MS`          | Poll interval, clamped to 5000–10000.                                                                                   |
+| Variable                        | Role                                                                                                                                                                                                 |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OTEL_DEMO_FAULTS`              | JSON array. Each object has `id`, `type`, and optional `service`, `operation`, `probability`, and `delayMs`.                                                                                         |
+| `OTEL_DEMO_FAULT_SCHEDULE`      | JSON object `{ windowStart, windowEnd, faults }`. Window timestamps are ISO-8601 UTC.                                                                                                                |
+| `OTEL_DEMO_FAULT_SCHEDULE_FILE` | Path to that object. Read once at startup.                                                                                                                                                           |
+| `OTEL_DEMO_FAULT_WINDOW_START`  | Window start when the schedule is the `OTEL_DEMO_FAULTS` array.                                                                                                                                      |
+| `OTEL_DEMO_FAULT_WINDOW_END`    | Window end. Faults stop at this instant. The process logs `fault window end` with `at` in UTC.                                                                                                       |
+| `OTEL_DEMO_FAULTS_ENABLED`      | Env kill switch when `FAULT_SWITCH_SOURCE=env` (the default). `true`, `1`, or `on` enables the loaded schedule.                                                                                      |
+| `FAULT_SWITCH_SOURCE`           | `env`, `file`, or `module`. `ssm` is rejected in application code.                                                                                                                                   |
+| `FAULT_SWITCH_FILE`             | File polled when the source is `file`. Contents are `on` or `off`.                                                                                                                                   |
+| `FAULT_SWITCH_MODULE`           | Module specifier that exports `createFaultSwitch`. On AWS this is `/opt/fault-switch/fault-switch.cjs`. The package export `@otel-demo/infra-aws/fault-switch` is the same reader outside the image. |
+| `FAULT_SWITCH_SSM_PARAMETER`    | Parameter name. Falls back to `OTEL_DEMO_FAULTS_PARAMETER`, then `/otel-demo/faults-enabled`.                                                                                                        |
+| `FAULT_SWITCH_POLL_MS`          | Poll interval, clamped to 5000–10000.                                                                                                                                                                |
 
 A successful read of `off` logs `faults off by operator` once for that transition. A failed read keeps the last successful value. Faults turn off with the log line `faults off by fail-safe` only after 3 consecutive failed reads and 60 seconds since the last successful read. The first poll inside an open window logs `fault window start` with `at` in UTC. Reaching `windowEnd` logs `fault window end` and stops injection without waiting for the kill switch.
 
@@ -112,9 +112,9 @@ A successful read of `off` logs `faults off by operator` once for that transitio
 - `delay` sets `fault.injected` and waits `delayMs`. The span stays unset so a slow success is not an error.
 - `error`, `timeout`, and `drop` set `fault.injected`, `fault.id`, `fault.type`, span status ERROR, and throw.
 
-`loadFaultInjectionConfig` is unchanged: it still returns an empty list unless `OTEL_DEMO_FAULTS_ENABLED` is set, and it does not apply faults. The running services use `loadFaultSchedule` plus the polled switch.
+`loadFaultInjectionConfig` is unchanged: it still returns an empty list unless `OTEL_DEMO_FAULTS_ENABLED` is set, and it does not apply faults.
 
-`OTEL_DEMO_LOAD_SCHEDULE_FILE` points at the load generator schedule (`loadgen/schedule.json`). When it is set, that file replaces the single fault window: each spike's fault block becomes its own UTC window, the first spike of the experiment stays a baseline with no fault, and the kill switch is still required. `LOADGEN_START_UTC` and `LOADGEN_SEED` override the file for both the generator and the services. A database `timeout` fault fails the SQL call before the driver and records `outcome=timeout`. `ping` is not faulted. Window start and end are logged in UTC. A process that starts inside a window does not log that start again.
+Each service calls `startServiceFaultControl` with its own name. When `OTEL_DEMO_LOAD_SCHEDULE_FILE` is set, that file replaces the single fault window: each spike's fault block becomes its own UTC window, the first spike of the experiment stays a baseline with no fault, and only windows for that service are armed. A missing or unreadable file fails startup. The single-window `OTEL_DEMO_FAULTS` list is not used while the load schedule is set. Startup logs `fault schedule loaded` with the service and its operations. The kill switch is still required and is polled. On AWS the task sets `FAULT_SWITCH_SOURCE=module` so the poll reads SSM (`OTEL_DEMO_FAULTS_PARAMETER`, default `/otel-demo/faults-enabled`) instead of a value captured once at process start. `LOADGEN_START_UTC` and `LOADGEN_SEED` override the file for both the generator and the services. A database `timeout` fault fails the SQL call before the driver and records `outcome=timeout`. `ping` is not faulted. Window start and end are logged in UTC. A process that starts inside a window does not log that start again. An injected fault sets `fault.injected` on the span and on the access log.
 
 ## Service ports
 

@@ -25,6 +25,8 @@
     "grafana:url": "tsx scripts/grafana-url.ts",
     "seed": "tsx scripts/seed.ts",
     "seed:aws": "tsx scripts/seed-aws.ts",
+    "restock": "tsx scripts/restock.ts",
+    "restock:aws": "tsx scripts/restock-aws.ts",
     "loadgen:start": "tsx scripts/loadgen-scale.ts 1",
     "loadgen:stop": "tsx scripts/loadgen-scale.ts 0",
     "image:build": "bash scripts/build-service-image.sh"

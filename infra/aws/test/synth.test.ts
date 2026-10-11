@@ -288,9 +288,17 @@ describe('cdk synth', () => {
       expect(envValue(app.environment, 'OTEL_DEMO_LOAD_SCHEDULE_FILE')).toBe(
         '/app/loadgen/schedule.json',
       );
+      expect(envValue(app.environment, 'FAULT_SWITCH_SOURCE')).toBe('module');
+      expect(envValue(app.environment, 'FAULT_SWITCH_MODULE')).toBe(
+        '/opt/fault-switch/fault-switch.cjs',
+      );
+      expect(envValue(app.environment, 'OTEL_DEMO_FAULTS_PARAMETER')).toBe(
+        '/otel-demo/faults-enabled',
+      );
     }
     const loadgen = apps.find((app) => app.family === 'otel-demo-loadgen');
     expect(envValue(loadgen?.environment ?? [], 'OTEL_DEMO_LOAD_SCHEDULE_FILE')).toBeUndefined();
+    expect(envValue(loadgen?.environment ?? [], 'FAULT_SWITCH_SOURCE')).toBeUndefined();
     for (const app of apps) {
       expect(envValue(app.environment, 'LOADGEN_START_UTC')).toBeUndefined();
     }

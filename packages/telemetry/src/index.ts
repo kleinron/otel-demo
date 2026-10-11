@@ -153,6 +153,7 @@ export {
   createWindowedFaultController,
   databaseFaultHook,
   loadPlanFromEnv,
-  startScheduledFaultControl as startFaultControl,
+  startScheduledFaultControl,
+  startServiceFaultControl,
   type WindowedFaultControllerOptions,
 } from './schedule-faults.js';

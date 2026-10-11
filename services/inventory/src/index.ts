@@ -6,7 +6,7 @@ import {
   createOutboundMetrics,
   databaseFaultHook,
   getServiceMeter,
-  startFaultControl,
+  startServiceFaultControl,
   startTelemetry,
 } from '@otel-demo/telemetry';
 import { migrateInventory } from './schema.js';
@@ -18,7 +18,7 @@ const logger = createLogger({ service: SERVICE_NAME });
 const meter = getServiceMeter(SERVICE_NAME);
 const metrics = createHttpMetrics(meter, { service: SERVICE_NAME });
 const outbound = createOutboundMetrics(meter, { service: SERVICE_NAME });
-const faults = await startFaultControl(env, faultLog(logger));
+const faults = await startServiceFaultControl(SERVICE_NAME, env, faultLog(logger));
 const databaseUrl = requiredEnv(env.DATABASE_URL, 'DATABASE_URL');
 const sql = await connectPg(databaseUrl, {
   timeoutMs: readTimeoutMs(env.DB_STATEMENT_TIMEOUT_MS, 5_000),

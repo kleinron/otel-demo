@@ -1,5 +1,6 @@
 import { createTestSql } from '../../../packages/db/testutil/sql.ts';
 import { describe, expect, it } from 'vitest';
+import { stockOnHand, WAREHOUSES } from '../src/catalog.js';
 import { seedInventory } from '../src/seed.js';
 import { buildApp } from '../src/server.js';
 
@@ -37,7 +38,11 @@ describe('inventory reservations', () => {
 
     const sku = await app.inject({ method: 'GET', url: '/skus/phone-aurora' });
     expect(sku.statusCode).toBe(200);
-    expect(sku.json()).toMatchObject({ priceCents: 249900, available: 119 });
+    const onHand = WAREHOUSES.reduce(
+      (sum, warehouse) => sum + stockOnHand('phone-aurora', warehouse.id),
+      0,
+    );
+    expect(sku.json()).toMatchObject({ priceCents: 249900, available: onHand - 1 });
 
     const released = await app.inject({
       method: 'POST',

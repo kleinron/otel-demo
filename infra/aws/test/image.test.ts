@@ -26,6 +26,9 @@ describe('service image', () => {
   it('ships loadgen/schedule.json at the path services read', () => {
     expect(dockerfile).toContain('COPY loadgen/schedule.json /app/loadgen/schedule.json');
     expect(dockerfile).toContain('test -f /app/loadgen/schedule.json');
+    const entry = readFileSync(join(ROOT, 'infra/aws/docker/fault-switch.cjs'), 'utf8');
+    expect(entry).toContain('function createFaultSwitch');
+    expect(entry).toContain('OTEL_DEMO_FAULTS_PARAMETER');
     const ignore = readFileSync(join(ROOT, '.dockerignore'), 'utf8')
       .split('\n')
       .map((line) => line.trim())

@@ -3,14 +3,19 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from '@opentelemetry/sdk-trace-base';
-import { describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'node:url';
 import { createSql, DbTimeoutError, type QueryExecutor, type SqlRows } from '@otel-demo/db';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildPlan,
   databaseFaultHook,
   FAULT_INJECTED_ATTRIBUTE,
   parseLoadSchedule,
   createWindowedFaultController,
+  startServiceFaultControl,
   type FaultControlLog,
 } from '../src/index.js';
 
@@ -88,7 +93,77 @@ const plan = buildPlan(
   }),
 );
 
+const CHECKED_IN_SCHEDULE = fileURLToPath(
+  new URL('../../../loadgen/schedule.json', import.meta.url),
+);
+
 describe('schedule fault windows', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('starts a service on the checked-in schedule and ignores other services', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-12T14:05:00.000Z'));
+    const messages: string[] = [];
+    const fields: Record<string, unknown>[] = [];
+    const env = {
+      OTEL_DEMO_LOAD_SCHEDULE_FILE: CHECKED_IN_SCHEDULE,
+      LOADGEN_START_UTC: '2026-10-12T08:30:00.000Z',
+      OTEL_DEMO_FAULTS_ENABLED: 'on',
+      OTEL_DEMO_FAULTS: JSON.stringify([
+        { id: 'decoy', type: 'error', service: 'shop', operation: 'checkout' },
+      ]),
+    };
+    const inventory = await startServiceFaultControl('inventory', env, capture(messages, fields));
+    expect(inventory.isActive()).toBe(true);
+    expect(messages).toContain('fault schedule loaded');
+    expect(fields.at(-1)).toMatchObject({
+      service: 'inventory',
+      schedule: CHECKED_IN_SCHEDULE,
+      operations: ['database'],
+    });
+    inventory.stop();
+
+    const shop = await startServiceFaultControl('shop', env, capture(messages, fields));
+    expect(shop.isActive()).toBe(false);
+    expect(fields.at(-1)).toMatchObject({
+      service: 'shop',
+      operations: ['add-to-cart', 'checkout'],
+    });
+    shop.stop();
+  });
+
+  it('stays inactive while the kill switch is off', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-12T12:05:00.000Z'));
+    const controller = await startServiceFaultControl('shop', {
+      OTEL_DEMO_LOAD_SCHEDULE_FILE: CHECKED_IN_SCHEDULE,
+      LOADGEN_START_UTC: '2026-10-12T08:30:00.000Z',
+      OTEL_DEMO_FAULTS_ENABLED: 'off',
+    });
+    expect(controller.isActive()).toBe(false);
+    const provider = tracer();
+    const span = provider.span();
+    await controller.apply({ service: 'shop', operation: 'checkout' }, span);
+    span.end();
+    expect(provider.finished()[0]?.attributes[FAULT_INJECTED_ATTRIBUTE]).toBeUndefined();
+    controller.stop();
+  });
+
+  it('fails startup when the schedule file cannot be read', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'missing-schedule-'));
+    const missing = join(directory, 'schedule.json');
+    await expect(
+      startServiceFaultControl('shop', {
+        OTEL_DEMO_LOAD_SCHEDULE_FILE: missing,
+        OTEL_DEMO_FAULTS_ENABLED: 'on',
+      }),
+    ).rejects.toThrow(`fault schedule ${missing} is unreadable`);
+    await writeFile(missing, '{', 'utf8');
+    await expect(
+      startServiceFaultControl('payment', { OTEL_DEMO_LOAD_SCHEDULE_FILE: missing }),
+    ).rejects.toThrow(`fault schedule ${missing} is unreadable`);
+  });
+
   it('applies a fault only inside its window and only while the kill switch is on', async () => {
     let enabled = false;
     const now = Date.parse('2026-10-12T12:05:00.000Z');

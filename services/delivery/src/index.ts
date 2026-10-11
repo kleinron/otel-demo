@@ -6,7 +6,7 @@ import {
   createOutboundMetrics,
   databaseFaultHook,
   getServiceMeter,
-  startFaultControl,
+  startServiceFaultControl,
   startTelemetry,
 } from '@otel-demo/telemetry';
 import { migrateDelivery } from './schema.js';
@@ -18,7 +18,7 @@ const logger = createLogger({ service: SERVICE_NAME });
 const meter = getServiceMeter(SERVICE_NAME);
 const metrics = createHttpMetrics(meter, { service: SERVICE_NAME });
 const outbound = createOutboundMetrics(meter, { service: SERVICE_NAME });
-const faults = await startFaultControl(env, {
+const faults = await startServiceFaultControl(SERVICE_NAME, env, {
   info(message, fields) {
     logger.info(fields ?? {}, message);
   },

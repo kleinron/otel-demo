@@ -19,7 +19,7 @@ export function createFaultSwitch(
   env: Record<string, string | undefined> = process.env,
   client?: SsmParameterClient,
 ): FaultSwitchReader {
-  const parameterName = env.FAULT_SWITCH_SSM_PARAMETER?.trim() || DEFAULT_FAULT_SWITCH_PARAMETER;
+  const parameterName = faultSwitchParameterName(env);
   let cached = client;
   return {
     async read() {
@@ -32,6 +32,15 @@ export function createFaultSwitch(
       return parseSwitch(value);
     },
   };
+}
+
+/** `FAULT_SWITCH_SSM_PARAMETER`, then `OTEL_DEMO_FAULTS_PARAMETER`, then the default name. */
+export function faultSwitchParameterName(env: Record<string, string | undefined>): string {
+  return (
+    env.FAULT_SWITCH_SSM_PARAMETER?.trim() ||
+    env.OTEL_DEMO_FAULTS_PARAMETER?.trim() ||
+    DEFAULT_FAULT_SWITCH_PARAMETER
+  );
 }
 
 function createClient(env: Record<string, string | undefined>): SsmParameterClient {

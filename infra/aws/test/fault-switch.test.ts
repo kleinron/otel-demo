@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createFaultSwitch,
   DEFAULT_FAULT_SWITCH_PARAMETER,
+  faultSwitchParameterName,
   type SsmParameterClient,
 } from '../src/fault-switch.js';
 
@@ -21,6 +22,24 @@ describe('SSM fault switch', () => {
     expect(new GetParameterCommand({ Name: DEFAULT_FAULT_SWITCH_PARAMETER }).input.Name).toBe(
       '/otel-demo/faults-enabled',
     );
+  });
+
+  it('reads OTEL_DEMO_FAULTS_PARAMETER when the SSM override is unset', async () => {
+    expect(
+      faultSwitchParameterName({ OTEL_DEMO_FAULTS_PARAMETER: '/otel-demo/faults-enabled' }),
+    ).toBe('/otel-demo/faults-enabled');
+    const names: string[] = [];
+    const reader = createFaultSwitch(
+      { OTEL_DEMO_FAULTS_PARAMETER: '/otel-demo/faults-enabled' },
+      {
+        async send(command) {
+          names.push(command.input.Name ?? '');
+          return { Parameter: { Value: 'on' } };
+        },
+      },
+    );
+    await expect(reader.read()).resolves.toBe(true);
+    expect(names).toEqual(['/otel-demo/faults-enabled']);
   });
 
   it('treats an explicit false value as the operator turning faults off', async () => {

@@ -77,7 +77,15 @@ After the first deploy, seed reference data before any checkout traffic. Payment
 npm run seed:aws
 ```
 
-That is a required step after the first deploy. The seed program drops the shop and inventory tables and loads the reference data again. Run it again only when that data should be rebuilt. The `demo` image has to include `services/shop/dist/seed-main.js` and `services/inventory/dist/seed-main.js`, so push that image before seeding. The task entrypoint still runs the fault switch, which builds `DATABASE_URL` from the task's database settings, then starts the seed program. Region defaults to `eu-central-1` (`AWS_REGION` or `EXPERIMENT_REGION` override it). The command names the cluster `otel-demo` and the services `otel-demo-shop` and `otel-demo-inventory`.
+That is a required step after the first deploy. The seed program drops the shop and inventory tables and loads the reference data again. Run it again only when that data should be rebuilt. Do not run it during a live experiment: it deletes shop orders. The `demo` image has to include `services/shop/dist/seed-main.js`, `services/inventory/dist/seed-main.js`, and `services/inventory/dist/restock-main.js`, so push that image before seeding. The task entrypoint builds `DATABASE_URL` from the task's database settings, then starts the seed program. Region defaults to `eu-central-1` (`AWS_REGION` or `EXPERIMENT_REGION` override it). The command names the cluster `otel-demo` and the services `otel-demo-shop` and `otel-demo-inventory`.
+
+If checkouts start returning `out_of_stock` because regular SKUs are exhausted, top the inventory back up without touching orders:
+
+```bash
+npm run restock:aws
+```
+
+That runs only `services/inventory/dist/restock-main.js` on the deployed inventory task. Available stock (`on_hand - reserved`) returns to the seed target. Reservations stay. Running it twice writes the same on-hand counts when nothing new has been reserved. Locally, with `INVENTORY_DATABASE_URL` set, the same program is `npm run restock`.
 
 The load generator service is created with desired count 0. A later `cdk deploy` rolls a generator that is already running, and that roll starts a new task. After any `cdk deploy`, run this first when the runner should stay stopped:
 
@@ -94,7 +102,7 @@ npm run loadgen:stop
 
 Those set the `otel-demo-loadgen` desired count to 1 and 0.
 
-Scheduled faults fire only when the SSM parameter `/otel-demo/faults-enabled` is `on`. `off` is the emergency stop. The stack creates the parameter as `off`.
+Scheduled faults fire only when the SSM parameter `/otel-demo/faults-enabled` is `on`. `off` is the emergency stop. The stack creates the parameter as `off`. Each service polls that parameter (`FAULT_SWITCH_SOURCE=module`, module `/opt/fault-switch/fault-switch.cjs`, name from `OTEL_DEMO_FAULTS_PARAMETER`) and applies only the `loadgen/schedule.json` windows for its own operations. Turning the parameter `on` takes effect on the next poll, without a new deploy. A service logs `fault schedule loaded` at startup, then `fault window start` and `fault window end`. An injected fault is `fault.injected` on the span and the access log. The schedule file in the image is `/app/loadgen/schedule.json`; if that file is missing, the service fails at startup.
 
 Grafana is plain HTTP on port 3000. The task is in a public subnet and has a public address. Its security group is created with no inbound rules. After every deploy, including a redeploy, add your address on port 3000 to the group in the `GrafanaSecurityGroupId` output. The group does not keep that rule across a redeploy. The task address changes when the task restarts. With credentials in the environment:
 
