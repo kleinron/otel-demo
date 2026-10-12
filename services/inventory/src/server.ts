@@ -31,6 +31,8 @@ export const SERVICE_NAME = 'inventory';
 export const DEFAULT_PORT = 3002;
 
 export interface BuildAppOptions {
+  /** Readiness check; `/ready` answers 503 while it reports the database down. */
+  ready?: () => Promise<boolean>;
   metrics?: HttpMetrics;
   outbound?: OutboundMetrics;
   logger?: Logger;
@@ -55,6 +57,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     });
   });
   app.get('/health', async () => ({ status: 'ok' as const, service: SERVICE_NAME }));
+  app.get('/ready', async (_request, reply) => {
+    const ok = options.ready ? await options.ready() : true;
+    return reply
+      .code(ok ? 200 : 503)
+      .send({ status: ok ? 'ready' : 'database_unavailable', service: SERVICE_NAME });
+  });
 
   app.post('/reservations', async (request, reply) =>
     inRequest(request, async () => {

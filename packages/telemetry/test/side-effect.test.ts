@@ -162,3 +162,23 @@ describe('withLoggedWrites', () => {
     expect(text).not.toContain('Haifa');
   });
 });
+
+describe('errorFields', () => {
+  it('logs connection error messages and codes but never arbitrary messages', async () => {
+    const { errorFields } = await import('../src/side-effect.js');
+    expect(errorFields(new Error('Connection terminated unexpectedly'))).toMatchObject({
+      error_message: 'Connection terminated unexpectedly',
+    });
+    expect(
+      errorFields(
+        Object.assign(new Error('connect ECONNREFUSED db.invalid:5432'), { code: 'ECONNREFUSED' }),
+      ),
+    ).toMatchObject({
+      error_code: 'ECONNREFUSED',
+      error_message: 'connect ECONNREFUSED db.invalid:5432',
+    });
+    expect(errorFields(new Error("timeout during UPDATE x SET a='secret'"))).toEqual({
+      error_name: 'Error',
+    });
+  });
+});

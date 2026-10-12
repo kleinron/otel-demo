@@ -84,7 +84,7 @@ export function registerAccessLog(app: FastifyInstance, logger?: Logger): void {
   app.addHook('onResponse', async (request, reply) => {
     const route = routeOperation(request.routeOptions.url);
     const path = request.url.split('?')[0] ?? '';
-    if (route === '/health' || path === '/health') {
+    if (route === '/health' || path === '/health' || route === '/ready' || path === '/ready') {
       return;
     }
     const ctx = contexts.get(request);

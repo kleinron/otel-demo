@@ -1,79 +1,250 @@
-import { Pool, type PoolClient } from 'pg';
+import { Pool, type PoolConfig } from 'pg';
 import { createSql, type QueryExecutor, type Sql, type SqlOptions, type SqlRows } from './sql.js';
 
-export function createPgSql(connectionString: string, options: SqlOptions = {}): Sql {
-  return createSql(createPgExecutor(connectionString, options.timeoutMs ?? 5_000), options);
+/** Pool and recovery settings. Defaults are tuned so a DB blip clears within seconds. */
+export interface PgPoolOptions {
+  /** Max time to open a new connection before failing fast (default 3s). */
+  connectTimeoutMs?: number;
+  /** Close idle clients after this long so stale sockets are not reused (default 10s). */
+  idleTimeoutMs?: number;
+  /** Total attempts for a query that fails with a transient connection error (default 3). */
+  retryAttempts?: number;
+  /** First backoff delay; doubles per attempt, with jitter (default 100ms). */
+  retryBaseDelayMs?: number;
+  /** Called when the pool or a query sees a connection-level error. */
+  onConnectionError?: (error: unknown) => void;
+  /** Test hook: build the pool. */
+  createPool?: (config: PoolConfig) => PoolLike;
+}
+
+/** The subset of pg.Pool used here, so tests can simulate an outage. */
+export interface PoolLike {
+  connect(): Promise<PoolClientLike>;
+  on(event: 'error', listener: (error: Error) => void): unknown;
+  end(): Promise<void>;
+}
+
+export interface PoolClientLike {
+  query(text: string, params?: unknown[]): Promise<{ rows: unknown[] }>;
+  release(destroy?: boolean | Error): void;
+}
+
+export type PgSqlOptions = SqlOptions & PgPoolOptions;
+
+export interface PgSql extends Sql {
+  /** Cheap readiness check: true only if a `SELECT 1` succeeds within the connect timeout. */
+  ping(): Promise<boolean>;
+}
+
+export function createPgSql(connectionString: string, options: PgSqlOptions = {}): PgSql {
+  const executor = createPgExecutor(connectionString, options.timeoutMs ?? 5_000, options);
+  const sql = createSql(executor, options);
+  return { ...sql, ping: executor.ping };
 }
 
 export async function connectPg(
   connectionString: string,
-  options: SqlOptions & { attempts?: number; delayMs?: number } = {},
-): Promise<Sql> {
+  options: PgSqlOptions & { attempts?: number; delayMs?: number } = {},
+): Promise<PgSql> {
   const attempts = options.attempts ?? 10;
   const delayMs = options.delayMs ?? 500;
+  // One pool for the life of the process. A failed attempt does not poison it:
+  // broken clients are destroyed, and the next attempt opens a fresh connection.
+  const sql = createPgSql(connectionString, options);
   let last: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const sql = createPgSql(connectionString, options);
     try {
       await sql.query('SELECT 1 AS ok', [], 'ping');
       return sql;
     } catch (error) {
       last = error;
-      await sql.close().catch(() => undefined);
       if (attempt < attempts) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        await sleep(delayMs);
       }
     }
   }
+  await sql.close().catch(() => undefined);
   const message = last instanceof Error ? last.message : 'unknown error';
   throw new Error(`could not connect to the service database: ${message}`);
 }
 
-function createPgExecutor(connectionString: string, timeoutMs: number): QueryExecutor {
-  const pool = new Pool({
+const TRANSIENT_CODES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EPIPE',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  '57P01', // admin_shutdown
+  '57P02', // crash_shutdown
+  '57P03', // cannot_connect_now (starting up)
+  '53300', // too_many_connections
+]);
+
+/** True for errors that mean "the connection is gone or not up yet", not a bad query. */
+export function isTransientConnectionError(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || error instanceof TransactionAbortedError) {
+    return false;
+  }
+  const code = (error as { code?: unknown }).code;
+  if (typeof code === 'string' && (TRANSIENT_CODES.has(code) || code.startsWith('08'))) {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : '';
+  return /connection terminated|terminating connection|connection (?:refused|reset)|server closed the connection|timeout exceeded when trying to connect|client has encountered a connection error|not queryable|socket hang up|the database system is (?:starting up|shutting down)/i.test(
+    message,
+  );
+}
+
+interface PgExecutor extends QueryExecutor {
+  ping(): Promise<boolean>;
+}
+
+function createPgExecutor(
+  connectionString: string,
+  timeoutMs: number,
+  options: PgPoolOptions,
+): PgExecutor {
+  const connectTimeoutMs = options.connectTimeoutMs ?? 3_000;
+  const attempts = Math.max(1, options.retryAttempts ?? 3);
+  const baseDelayMs = options.retryBaseDelayMs ?? 100;
+  const config: PoolConfig = {
     connectionString,
     max: 5,
+    connectionTimeoutMillis: connectTimeoutMs,
+    idleTimeoutMillis: options.idleTimeoutMs ?? 10_000,
+    keepAlive: true,
     query_timeout: timeoutMs,
     statement_timeout: timeoutMs,
-  });
-  pool.on('error', () => {
-    // Idle client failures surface on the next query.
+  };
+  const pool: PoolLike = options.createPool ? options.createPool(config) : new Pool(config);
+  pool.on('error', (error) => {
+    // pg already removes the idle client that emitted this; report it so the
+    // outage is visible instead of silently swallowed.
+    options.onConnectionError?.(error);
   });
 
-  function fromClient(client: Pool | PoolClient, close: () => Promise<void>): QueryExecutor {
+  /** Check out a client, run fn, and destroy the client if its connection broke. */
+  async function withClient<T>(fn: (client: PoolClientLike) => Promise<T>): Promise<T> {
+    const client = await pool.connect();
+    try {
+      const value = await fn(client);
+      client.release();
+      return value;
+    } catch (error) {
+      // Never hand a broken client back to the pool.
+      client.release(isTransientConnectionError(error) ? asError(error) : undefined);
+      throw error;
+    }
+  }
+
+  async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await fn();
+      } catch (error) {
+        if (!isTransientConnectionError(error)) {
+          throw error;
+        }
+        options.onConnectionError?.(error);
+        if (attempt >= attempts) {
+          throw error;
+        }
+        const delay = baseDelayMs * 2 ** (attempt - 1);
+        await sleep(delay / 2 + Math.random() * (delay / 2));
+      }
+    }
+  }
+
+  function fromClient(client: PoolClientLike): QueryExecutor {
     return {
-      async query<T extends Record<string, unknown>>(
-        text: string,
-        params: readonly unknown[],
-      ): Promise<SqlRows<T>> {
+      async query<T extends Record<string, unknown>>(text: string, params: readonly unknown[]) {
         const result = await client.query(text, params as unknown[]);
         return { rows: result.rows as T[] };
       },
-      async transaction<T>(fn: (executor: QueryExecutor) => Promise<T>): Promise<T> {
-        if (client !== pool) {
-          throw new Error('nested transactions are not supported');
-        }
-        const checkedOut = await pool.connect();
-        const executor = fromClient(checkedOut, async () => undefined);
-        try {
-          await checkedOut.query('BEGIN');
-          const value = await fn(executor);
-          await checkedOut.query('COMMIT');
-          return value;
-        } catch (error) {
-          try {
-            await checkedOut.query('ROLLBACK');
-          } catch {
-            // The original error is the one the caller needs.
-          }
-          throw error;
-        } finally {
-          checkedOut.release();
-        }
+      async transaction() {
+        throw new Error('nested transactions are not supported');
       },
-      close,
+      async close() {},
     };
   }
 
-  return fromClient(pool, () => pool.end());
+  return {
+    query<T extends Record<string, unknown>>(
+      text: string,
+      params: readonly unknown[],
+    ): Promise<SqlRows<T>> {
+      // Writes in this repo carry an idempotency key (orderId / unique keys), so
+      // a retry after a dropped connection is safe.
+      return withRetry(() =>
+        withClient(async (client) => {
+          const result = await client.query(text, params as unknown[]);
+          return { rows: result.rows as T[] };
+        }),
+      );
+    },
+    transaction<T>(fn: (executor: QueryExecutor) => Promise<T>): Promise<T> {
+      // Only the connect + BEGIN step is retried; once user work starts, an
+      // error propagates so a half-done transaction is never replayed blindly.
+      return withRetry(async () => {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+        } catch (error) {
+          client.release(asError(error));
+          throw error;
+        }
+        try {
+          const value = await fn(fromClient(client));
+          await client.query('COMMIT');
+          client.release();
+          return value;
+        } catch (error) {
+          let broken = isTransientConnectionError(error);
+          if (!broken) {
+            try {
+              await client.query('ROLLBACK');
+            } catch {
+              broken = true;
+            }
+          }
+          client.release(broken ? asError(error) : undefined);
+          throw markNonRetryable(error);
+        }
+      });
+    },
+    async ping() {
+      try {
+        await withClient((client) => client.query('SELECT 1'));
+        return true;
+      } catch (error) {
+        options.onConnectionError?.(error);
+        return false;
+      }
+    },
+    close: () => pool.end(),
+  };
+}
+
+/** Thrown when the connection drops mid-transaction; never retried automatically. */
+export class TransactionAbortedError extends Error {
+  constructor(override readonly cause: unknown) {
+    super('transaction aborted: the database connection was lost');
+    this.name = 'TransactionAbortedError';
+  }
+}
+
+/** A failure inside transaction work must not trigger a replay of the whole transaction. */
+function markNonRetryable(error: unknown): unknown {
+  return isTransientConnectionError(error) ? new TransactionAbortedError(error) : error;
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
