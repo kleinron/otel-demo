@@ -99,4 +99,5 @@ dash = {
 }
 out = pathlib.Path(__file__).parent / "provisioning/dashboard-json/otel-demo.json"
 out.write_text(json.dumps(dash, indent=2) + "\n")
+print(f"run: npx prettier --write {out}")
 print(f"wrote {out} ({len(panels)} panels)")

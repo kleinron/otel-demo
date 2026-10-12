@@ -1,10 +1,7 @@
 {
   "uid": "otel-demo",
   "title": "otel-demo",
-  "tags": [
-    "otel-demo",
-    "gcp"
-  ],
+  "tags": ["otel-demo", "gcp"],
   "timezone": "utc",
   "schemaVersion": 39,
   "version": 1,
@@ -88,9 +85,7 @@
               "=",
               "shop"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
             "alignmentPeriod": "60s",
@@ -138,9 +133,7 @@
               "=",
               "shop"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
             "alignmentPeriod": "60s",
@@ -188,9 +181,7 @@
               "=",
               "shop"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_PERCENTILE_50",
             "perSeriesAligner": "ALIGN_DELTA",
             "alignmentPeriod": "60s",
@@ -238,9 +229,7 @@
               "=",
               "shop"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_PERCENTILE_95",
             "perSeriesAligner": "ALIGN_DELTA",
             "alignmentPeriod": "60s",
@@ -288,9 +277,7 @@
               "=",
               "shop"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_PERCENTILE_99",
             "perSeriesAligner": "ALIGN_DELTA",
             "alignmentPeriod": "60s",
@@ -338,10 +325,7 @@
               "=",
               "shop"
             ],
-            "groupBys": [
-              "metric.label.target",
-              "metric.label.outcome"
-            ],
+            "groupBys": ["metric.label.target", "metric.label.outcome"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
             "alignmentPeriod": "60s",
@@ -401,9 +385,7 @@
               "=",
               "inventory"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
             "alignmentPeriod": "60s",
@@ -451,9 +433,7 @@
               "=",
               "inventory"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
             "alignmentPeriod": "60s",
@@ -501,9 +481,7 @@
               "=",
               "inventory"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_PERCENTILE_50",
             "perSeriesAligner": "ALIGN_DELTA",
             "alignmentPeriod": "60s",
@@ -551,9 +529,7 @@
               "=",
               "inventory"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_PERCENTILE_95",
             "perSeriesAligner": "ALIGN_DELTA",
             "alignmentPeriod": "60s",
@@ -601,9 +577,7 @@
               "=",
               "inventory"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_PERCENTILE_99",
             "perSeriesAligner": "ALIGN_DELTA",
             "alignmentPeriod": "60s",
@@ -651,10 +625,7 @@
               "=",
               "inventory"
             ],
-            "groupBys": [
-              "metric.label.target",
-              "metric.label.outcome"
-            ],
+            "groupBys": ["metric.label.target", "metric.label.outcome"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
             "alignmentPeriod": "60s",
@@ -714,9 +685,7 @@
               "=",
               "payment"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
             "alignmentPeriod": "60s",
@@ -764,9 +733,7 @@
               "=",
               "payment"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
             "alignmentPeriod": "60s",
@@ -814,9 +781,7 @@
               "=",
               "payment"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_PERCENTILE_50",
             "perSeriesAligner": "ALIGN_DELTA",
             "alignmentPeriod": "60s",
@@ -864,9 +829,7 @@
               "=",
               "payment"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_PERCENTILE_95",
             "perSeriesAligner": "ALIGN_DELTA",
             "alignmentPeriod": "60s",
@@ -914,9 +877,7 @@
               "=",
               "payment"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_PERCENTILE_99",
             "perSeriesAligner": "ALIGN_DELTA",
             "alignmentPeriod": "60s",
@@ -964,10 +925,7 @@
               "=",
               "payment"
             ],
-            "groupBys": [
-              "metric.label.target",
-              "metric.label.outcome"
-            ],
+            "groupBys": ["metric.label.target", "metric.label.outcome"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
             "alignmentPeriod": "60s",
@@ -1027,9 +985,7 @@
               "=",
               "delivery"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
             "alignmentPeriod": "60s",
@@ -1077,9 +1033,7 @@
               "=",
               "delivery"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
             "alignmentPeriod": "60s",
@@ -1127,9 +1081,7 @@
               "=",
               "delivery"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_PERCENTILE_50",
             "perSeriesAligner": "ALIGN_DELTA",
             "alignmentPeriod": "60s",
@@ -1177,9 +1129,7 @@
               "=",
               "delivery"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_PERCENTILE_95",
             "perSeriesAligner": "ALIGN_DELTA",
             "alignmentPeriod": "60s",
@@ -1227,9 +1177,7 @@
               "=",
               "delivery"
             ],
-            "groupBys": [
-              "metric.label.operation"
-            ],
+            "groupBys": ["metric.label.operation"],
             "crossSeriesReducer": "REDUCE_PERCENTILE_99",
             "perSeriesAligner": "ALIGN_DELTA",
             "alignmentPeriod": "60s",
@@ -1277,10 +1225,7 @@
               "=",
               "delivery"
             ],
-            "groupBys": [
-              "metric.label.target",
-              "metric.label.outcome"
-            ],
+            "groupBys": ["metric.label.target", "metric.label.outcome"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
             "alignmentPeriod": "60s",
@@ -1344,9 +1289,7 @@
               "=",
               "/carts/:cartId/checkout"
             ],
-            "groupBys": [
-              "metric.label.outcome"
-            ],
+            "groupBys": ["metric.label.outcome"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
             "alignmentPeriod": "60s",
@@ -1398,9 +1341,7 @@
               "=",
               "/carts/:cartId/checkout"
             ],
-            "groupBys": [
-              "metric.label.http_response_status_code"
-            ],
+            "groupBys": ["metric.label.http_response_status_code"],
             "crossSeriesReducer": "REDUCE_SUM",
             "perSeriesAligner": "ALIGN_RATE",
             "alignmentPeriod": "60s",
