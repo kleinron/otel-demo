@@ -31,6 +31,34 @@ locals {
     experiment = "otel-demo"
     spike      = "gcp"
   }
+
+  apps = ["shop", "inventory", "payment", "delivery"]
+  app_containers = {
+    shop      = { port = 3001, cpu = var.shop_cpu, memory = "512Mi", depends_on = ["collector", "inventory", "payment", "delivery"] }
+    inventory = { port = 3002, cpu = var.sidecar_cpu, memory = "512Mi", depends_on = ["collector"] }
+    payment   = { port = 3003, cpu = var.sidecar_cpu, memory = "512Mi", depends_on = ["collector"] }
+    delivery  = { port = 3004, cpu = var.sidecar_cpu, memory = "512Mi", depends_on = ["collector"] }
+  }
+  common_env = {
+    LISTEN_ANY                  = "true"
+    LOG_LEVEL                   = "info"
+    LOG_FORMAT                  = "gcp"
+    CLOUD_PROVIDER              = "gcp"
+    GCP_PROJECT_ID              = var.project_id
+    OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4318"
+    DEPLOYMENT_ENVIRONMENT      = "gcp"
+    # Faults stay off unless the Secret Manager switch is set to on.
+    FAULT_SWITCH_SOURCE     = "module"
+    FAULT_SWITCH_MODULE     = "@otel-demo/infra-gcp/fault-switch"
+    FAULT_SWITCH_PROVIDER   = "gcp"
+    GCP_FAULT_SWITCH_SOURCE = "secret"
+    GCP_FAULT_SWITCH_SECRET = google_secret_manager_secret.faults.secret_id
+  }
+  shop_env = {
+    INVENTORY_URL = "http://localhost:3002"
+    PAYMENT_URL   = "http://localhost:3003"
+    DELIVERY_URL  = "http://localhost:3004"
+  }
 }
 
 resource "google_project_service" "required" {
@@ -43,6 +71,7 @@ resource "google_project_service" "required" {
       "secretmanager.googleapis.com",
       "logging.googleapis.com",
       "iam.googleapis.com",
+      "sqladmin.googleapis.com",
     ],
     var.create_budget ? [
       "billingbudgets.googleapis.com",
@@ -121,13 +150,11 @@ resource "google_secret_manager_secret_iam_member" "faults_accessor" {
   member    = "serviceAccount:${google_service_account.shop.email}"
 }
 
-resource "google_secret_manager_secret_iam_member" "database" {
-  count     = var.database_secret == "" ? 0 : 1
-  secret_id = var.database_secret
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.shop.email}"
-}
-
+# One Cloud Run service runs the whole store: shop is the ingress container,
+# inventory, payment, and delivery are sidecars on localhost:3002-3004, and the
+# collector sidecar exports every span to Cloud Trace. Each app container has
+# its own service.name and its own Cloud SQL database over the unix socket.
+# A single service keeps the backends private without any run.invoker grant.
 resource "google_cloud_run_v2_service" "shop" {
   name                = local.service_name
   location            = var.region
@@ -145,113 +172,65 @@ resource "google_cloud_run_v2_service" "shop" {
       max_instance_count = var.max_instances
     }
 
-    containers {
-      name    = "shop"
-      image   = var.shop_image
-      command = ["node", "services/shop/dist/index.js"]
+    volumes {
+      name = "cloudsql"
+      cloud_sql_instance {
+        instances = [for app in local.apps : google_sql_database_instance.app[app].connection_name]
+      }
+    }
 
-      ports {
-        container_port = 3001
-      }
+    dynamic "containers" {
+      for_each = local.app_containers
+      content {
+        name    = containers.key
+        image   = var.service_image
+        command = ["node", "services/${containers.key}/dist/index.js"]
 
-      resources {
-        limits = {
-          cpu    = "1"
-          memory = "512Mi"
-        }
-        # false means the CPU stays allocated between requests.
-        cpu_idle = false
-      }
-
-      env {
-        name  = "LISTEN_ANY"
-        value = "true"
-      }
-      # Cloud Run reserves PORT and sets it from container_port. Do not set it here.
-      env {
-        name  = "LOG_LEVEL"
-        value = "info"
-      }
-      env {
-        name  = "LOG_FORMAT"
-        value = "gcp"
-      }
-      env {
-        name  = "CLOUD_PROVIDER"
-        value = "gcp"
-      }
-      env {
-        name  = "GCP_PROJECT_ID"
-        value = var.project_id
-      }
-      env {
-        name  = "OTEL_SERVICE_NAME"
-        value = "shop"
-      }
-      env {
-        name  = "OTEL_EXPORTER_OTLP_ENDPOINT"
-        value = "http://localhost:4318"
-      }
-      env {
-        name  = "DEPLOYMENT_ENVIRONMENT"
-        value = "gcp-spike"
-      }
-      env {
-        name  = "FAULT_SWITCH_SOURCE"
-        value = "env"
-      }
-      env {
-        name  = "OTEL_DEMO_FAULTS_ENABLED"
-        value = "off"
-      }
-      env {
-        name  = "FAULT_SWITCH_PROVIDER"
-        value = "gcp"
-      }
-      env {
-        name  = "GCP_FAULT_SWITCH_SOURCE"
-        value = "secret"
-      }
-      env {
-        name  = "GCP_FAULT_SWITCH_SECRET"
-        value = google_secret_manager_secret.faults.secret_id
-      }
-      env {
-        name  = "INVENTORY_URL"
-        value = var.inventory_url
-      }
-      env {
-        name  = "PAYMENT_URL"
-        value = var.payment_url
-      }
-      env {
-        name  = "DELIVERY_URL"
-        value = var.delivery_url
-      }
-
-      dynamic "env" {
-        for_each = var.database_secret == "" ? [] : [var.database_secret]
-        content {
-          name = "DATABASE_URL"
-          value_source {
-            secret_key_ref {
-              secret  = env.value
-              version = "latest"
-            }
+        dynamic "ports" {
+          for_each = containers.key == "shop" ? [3001] : []
+          content {
+            container_port = ports.value
           }
         }
-      }
 
-      startup_probe {
-        tcp_socket {
-          port = 3001
+        resources {
+          limits = {
+            cpu    = containers.value.cpu
+            memory = containers.value.memory
+          }
+          # false means the CPU stays allocated between requests.
+          cpu_idle = false
         }
-        period_seconds    = 10
-        failure_threshold = 30
-        timeout_seconds   = 1
-      }
 
-      depends_on = ["collector"]
+        volume_mounts {
+          name       = "cloudsql"
+          mount_path = "/cloudsql"
+        }
+
+        # Cloud Run reserves PORT and sets it for the ingress container. Do not set it here.
+        # Sidecars listen on their default ports (3002, 3003, 3004).
+        dynamic "env" {
+          for_each = merge(local.common_env, {
+            OTEL_SERVICE_NAME = containers.key
+            DATABASE_URL      = local.database_urls[containers.key]
+          }, containers.key == "shop" ? local.shop_env : {})
+          content {
+            name  = env.key
+            value = env.value
+          }
+        }
+
+        startup_probe {
+          tcp_socket {
+            port = containers.value.port
+          }
+          period_seconds    = 10
+          failure_threshold = 30
+          timeout_seconds   = 1
+        }
+
+        depends_on = containers.value.depends_on
+      }
     }
 
     containers {
@@ -261,7 +240,7 @@ resource "google_cloud_run_v2_service" "shop" {
 
       resources {
         limits = {
-          cpu    = "1"
+          cpu    = var.sidecar_cpu
           memory = "512Mi"
         }
         cpu_idle = false
@@ -283,17 +262,19 @@ resource "google_cloud_run_v2_service" "shop" {
     }
   }
 
-  # The hard-stop job is created first so a stop exists before this service runs.
+  # The hard-stop jobs are created first so a stop exists before this service runs.
   depends_on = [
     google_project_service.required,
     google_artifact_registry_repository.demo,
     google_cloud_scheduler_job.hard_stop,
+    google_cloud_scheduler_job.sql_hard_stop,
+    google_project_iam_member.cloudsql_client,
   ]
 }
 
 resource "google_cloud_scheduler_job" "hard_stop" {
   name        = "otel-demo-hard-stop"
-  description = "Scale otel-demo-shop to zero instances at hard_stop_utc."
+  description = "Scale otel-demo-shop (all four services) to zero instances at hard_stop_utc."
   schedule    = local.hard_stop_cron
   time_zone   = "Etc/UTC"
   region      = local.scheduler_region

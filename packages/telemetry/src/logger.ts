@@ -17,7 +17,8 @@ import {
   currentOrderId,
   ORDER_ID_FIELD,
 } from './context.js';
-import { redactLogValue, redactSensitiveText } from './redact.js';
+import { redactLogEntry, redactLogValue, redactSensitiveText } from './redact.js';
+import { currentCartId } from './cart.js';
 import { toXrayTraceId } from './xray.js';
 
 export interface LoggerOptions {
@@ -132,7 +133,7 @@ function sharedRedact(): {
         return redactLogValue(bindings) as Record<string, unknown>;
       },
       log(object) {
-        return redactLogValue(object) as Record<string, unknown>;
+        return redactLogEntry(object, currentCartId());
       },
     },
     hooks: {
@@ -177,7 +178,7 @@ function gcpOptions(service: string, level: string, projectId: string | undefine
     base: { service },
     redact: shared.redact,
     mixin() {
-      return gcpTraceMixin(projectId);
+      return gcpTraceMixin(projectId, service);
     },
     mixinMergeStrategy(mergeObject: object, mixinObject: object) {
       return { ...mixinObject, ...mergeObject };
@@ -207,7 +208,10 @@ function traceMixin(cloudProvider: CloudProvider): Record<string, string | true>
   return fields;
 }
 
-function gcpTraceMixin(projectId: string | undefined): Record<string, string | boolean> {
+function gcpTraceMixin(
+  projectId: string | undefined,
+  service: string,
+): Record<string, string | boolean | Record<string, string>> {
   const fields: Record<string, string | boolean> = {};
   const span = trace.getSpan(context.active());
   if (span && isSpanContextValid(span.spanContext())) {
@@ -220,8 +224,15 @@ function gcpTraceMixin(projectId: string | undefined): Record<string, string | b
       (spanContext.traceFlags & TraceFlags.SAMPLED) === TraceFlags.SAMPLED;
   }
   appendContextFields(fields);
-  return fields;
+  // Cloud Logging lifts this into LogEntry.labels, and Error Reporting reads serviceContext.
+  return {
+    ...fields,
+    [GCP_LABELS_FIELD]: { service },
+    serviceContext: { service },
+  };
 }
+
+const GCP_LABELS_FIELD = 'logging.googleapis.com/labels';
 
 function appendContextFields(fields: Record<string, string | boolean>): void {
   const orderId = currentOrderId();

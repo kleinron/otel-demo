@@ -4,12 +4,21 @@ import {
   defaultTextMapSetter,
   type Context,
 } from '@opentelemetry/api';
-import { W3CTraceContextPropagator } from '@opentelemetry/core';
+import {
+  CompositePropagator,
+  W3CBaggagePropagator,
+  W3CTraceContextPropagator,
+} from '@opentelemetry/core';
 
-const propagator = new W3CTraceContextPropagator();
+const propagator = new CompositePropagator({
+  propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()],
+});
 
-/** W3C `traceparent` / `tracestate` propagator. B3 and Jaeger are not used. */
-export function createTracePropagator(): W3CTraceContextPropagator {
+/**
+ * W3C `traceparent` / `tracestate` plus W3C `baggage` (for `cart.id`).
+ * B3 and Jaeger are not used.
+ */
+export function createTracePropagator(): CompositePropagator {
   return propagator;
 }
 

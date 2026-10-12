@@ -31,6 +31,7 @@ describe('GCP terraform spike', () => {
   it('defines one Cloud Run service, a collector sidecar, and always-on CPU', () => {
     expect(text).toContain('resource "google_cloud_run_v2_service" "shop"');
     expect(text).toContain('min_instance_count = 1');
+    // One dynamic block for the four app containers, one for the collector.
     expect(text.match(/cpu_idle\s*=\s*false/g)?.length).toBe(2);
     expect(text).toContain('name  = "collector"');
     expect(text).toContain('exporters: [googlecloud]');
@@ -41,7 +42,8 @@ describe('GCP terraform spike', () => {
     expect(text).not.toContain('name  = "PORT"');
     expect(text).toContain('LOG_FORMAT');
     expect(text).toContain('CLOUD_PROVIDER');
-    expect(text).toContain('value = "gcp"');
+    expect(text).toMatch(/LOG_FORMAT\s*=\s*"gcp"/);
+    expect(text).toMatch(/CLOUD_PROVIDER\s*=\s*"gcp"/);
   });
 
   it('creates Artifact Registry, a budget defaulting to 25 USD, and a hard stop', () => {
@@ -76,6 +78,40 @@ describe('GCP terraform spike', () => {
       scheduler.indexOf('resource "google_pubsub_topic" "budget"'),
     );
     expect(schedulerDepends).not.toContain('google_cloud_run_v2_service.shop');
+  });
+
+  it('runs all four services with their own Cloud SQL database', () => {
+    expect(text).toContain('apps = ["shop", "inventory", "payment", "delivery"]');
+    expect(text).toContain('database_version    = "POSTGRES_16"');
+    expect(text).toContain('edition                     = "ENTERPRISE"');
+    expect(text).toContain('availability_type           = "ZONAL"');
+    expect(text).toContain('enabled                        = false');
+    expect(text).toContain('disk_size                   = 10');
+    expect(text).toContain('default     = "db-f1-micro"');
+    expect(text).toContain('host=/cloudsql/');
+    expect(text).toContain('resource "random_password" "db"');
+    expect(text).toContain('resource "google_secret_manager_secret_version" "db_password"');
+    expect(text).toContain('"roles/cloudsql.client"');
+    expect(text.match(/deletion_protection(_enabled)?\s*=\s*true/g)).toBeNull();
+    // The only project-level roles this module grants.
+    const roles = [...text.matchAll(/role\s*=\s*"(roles\/[^"]+)"/g)].map((m) => m[1]).sort();
+    expect([...new Set(roles)]).toEqual([
+      'roles/cloudsql.client',
+      'roles/cloudtrace.agent',
+      'roles/iam.serviceAccountTokenCreator',
+      'roles/pubsub.publisher',
+      'roles/run.developer',
+      'roles/secretmanager.secretAccessor',
+    ]);
+  });
+
+  it('stops every Cloud SQL instance and the load at the hard stop', () => {
+    expect(text).toContain('resource "google_cloud_scheduler_job" "sql_hard_stop"');
+    expect(text).toContain('activationPolicy = "NEVER"');
+    expect(text).toContain('https://sqladmin.googleapis.com/v1/projects/');
+    expect(text).toContain('default     = "* * 12-13 10 *"');
+    expect(text).toContain('name  = "LOAD_STOP_AT"');
+    expect(text).toContain('value = var.hard_stop_utc');
   });
 
   it('keeps secrets and addresses out of the spike files', () => {

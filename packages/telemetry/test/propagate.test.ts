@@ -1,5 +1,5 @@
 import { ROOT_CONTEXT, trace } from '@opentelemetry/api';
-import { W3CTraceContextPropagator } from '@opentelemetry/core';
+import { CompositePropagator } from '@opentelemetry/core';
 import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
 import { describe, expect, it } from 'vitest';
 import { createTracePropagator, extractTraceContext, injectTraceHeaders } from '../src/index.js';
@@ -8,9 +8,9 @@ const TRACE_ID = '4bf92f3577b34da6a3ce929d0e0e4736';
 const SPAN_ID = '00f067aa0ba902b7';
 
 describe('W3C traceparent propagation', () => {
-  it('uses the W3C trace-context propagator', () => {
-    expect(createTracePropagator()).toBeInstanceOf(W3CTraceContextPropagator);
-    expect(createTracePropagator().fields()).toEqual(['traceparent', 'tracestate']);
+  it('uses the W3C trace-context and baggage propagators', () => {
+    expect(createTracePropagator()).toBeInstanceOf(CompositePropagator);
+    expect(createTracePropagator().fields()).toEqual(['traceparent', 'tracestate', 'baggage']);
   });
 
   it('extracts and injects a traceparent header', () => {

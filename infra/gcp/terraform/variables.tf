@@ -59,9 +59,9 @@ variable "hard_stop_utc" {
   }
 }
 
-variable "shop_image" {
+variable "service_image" {
   type        = string
-  description = "Required. Shop container image in Artifact Registry. Build and push it before apply. Cloud Run must be able to run its architecture. See terraform.tfvars.example."
+  description = "Required. Image built from infra/gcp/docker/service.Dockerfile (linux/amd64). It holds all four services, the seed, and the load tick. See terraform.tfvars.example."
 }
 
 variable "collector_log_level" {
@@ -92,23 +92,42 @@ variable "max_instances" {
   }
 }
 
-variable "database_secret" {
+variable "shop_cpu" {
   type        = string
-  default     = ""
-  description = "Secret Manager secret id that holds DATABASE_URL. Empty omits it. The value is never stored in this repo."
+  default     = "1"
+  description = "CPU limit of the shop (ingress) container."
 }
 
-variable "inventory_url" {
-  type    = string
-  default = "http://localhost:3002"
+variable "sidecar_cpu" {
+  type        = string
+  default     = "0.5"
+  description = "CPU limit of each sidecar: inventory, payment, delivery, and the collector."
 }
 
-variable "payment_url" {
-  type    = string
-  default = "http://localhost:3003"
+variable "sql_tier" {
+  type        = string
+  default     = "db-f1-micro"
+  description = "Cloud SQL machine tier for each of the four Postgres 16 instances."
 }
 
-variable "delivery_url" {
-  type    = string
-  default = "http://localhost:3004"
+variable "sql_stop_service_account" {
+  type        = string
+  description = "Required. Existing service account that Cloud Scheduler acts as to set activationPolicy NEVER on each Cloud SQL instance at hard_stop_utc. It must already have cloudsql.instances.update. This module does not grant it."
+}
+
+variable "load_carts_per_minute" {
+  type        = number
+  default     = 12
+  description = "Simulated cart journeys per minute (browse, add to cart, checkout). 0 creates no load jobs."
+
+  validation {
+    condition     = var.load_carts_per_minute >= 0 && var.load_carts_per_minute <= 60
+    error_message = "load_carts_per_minute must be 0..60."
+  }
+}
+
+variable "load_cron" {
+  type        = string
+  default     = "* * 12-13 10 *"
+  description = "UTC cron for the load tick. The default only matches 2026-10-12 and 2026-10-13, so it ends at the hard stop."
 }

@@ -1,0 +1,17 @@
+# Builds infra/gcp/docker/service.Dockerfile for linux/amd64 and pushes _IMAGE.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      [
+        'build',
+        '--platform',
+        'linux/amd64',
+        '-f',
+        'infra/gcp/docker/service.Dockerfile',
+        '-t',
+        '${_IMAGE}',
+        '.',
+      ]
+images: ['${_IMAGE}']
+options:
+  logging: CLOUD_LOGGING_ONLY
