@@ -233,26 +233,17 @@ export function checkSpanNames(traces: Trace[]): CheckResult {
 
 export function checkNoOrphans(traces: Trace[]): CheckResult {
   const failures: string[] = [];
-  let allowed = 0;
+  let spans = 0;
   for (const trace of traces) {
     const ids = new Set(trace.spans.map((s) => s.spanId));
     for (const span of trace.spans) {
-      if (!span.parentSpanId || ids.has(span.parentSpanId)) {
-        continue;
+      spans += 1;
+      if (span.parentSpanId && !ids.has(span.parentSpanId)) {
+        failures.push(`${where(trace, span)}: parent ${span.parentSpanId} missing`);
       }
-      // Allowed gap: Cloud Run's front end is the parent of the shop's inbound span.
-      if (isServer(span) && label(span, 'service.name') === 'shop') {
-        allowed += 1;
-        continue;
-      }
-      if (isInfraSpan(span)) {
-        allowed += 1;
-        continue;
-      }
-      failures.push(`${where(trace, span)}: parent ${span.parentSpanId} missing`);
     }
   }
-  return result('no orphan spans', failures, `${allowed} allowed Cloud Run front-end gaps`);
+  return result('zero orphan spans', failures, `${spans} spans, no allowed gaps`);
 }
 
 export function checkCartId(traces: Trace[]): CheckResult {
@@ -490,31 +481,60 @@ export function hexSpanId(decimal: string): string {
 }
 
 const LOADGEN_STEPS = ['open-cart', 'browse', 'add-to-cart', 'checkout', 'close'];
+const isLoadgenStep = (s: TraceSpan) =>
+  label(s, 'service.name') === 'loadgen' && s.name.startsWith('cart ');
 
 /**
- * Loadgen root spans: one `cart <step>` root per shopper step, and the shop's
- * inbound span parented on it (no front-end gap) when loadgen tracing is on.
+ * Each request trace is rooted either at a loadgen step span (`cart <step>`,
+ * itself a root) that parents the shop's inbound span, or at a fresh shop
+ * root (non-loadgen traffic). Its root carries cart.id. All five steps appear.
  */
-export function checkLoadgenSteps(traces: Trace[]): CheckResult {
+export function checkRequestRoots(traces: Trace[]): CheckResult {
   const failures: string[] = [];
   const steps = new Set<string>();
+  let loadgenRooted = 0;
+  let freshRoots = 0;
+  const byId = (trace: Trace) => new Map(trace.spans.map((s) => [s.spanId, s]));
   for (const trace of traces) {
-    const lg = trace.spans.find((s) => label(s, 'service.name') === 'loadgen');
-    if (!lg) {
+    for (const span of trace.spans) {
+      if (isLoadgenStep(span)) {
+        steps.add(label(span, 'cart.step') ?? span.name.slice(5));
+        if (span.parentSpanId) {
+          failures.push(`${where(trace, span)}: loadgen step span is not a root`);
+        }
+      }
+    }
+    const root = requestRoot(trace);
+    if (!root) {
       continue;
     }
-    steps.add(label(lg, 'cart.step') ?? '?');
-    if (lg.parentSpanId) {
-      failures.push(`${where(trace, lg)}: loadgen step span is not a root`);
+    const parent = root.parentSpanId ? byId(trace).get(root.parentSpanId) : undefined;
+    let top: TraceSpan | undefined;
+    if (!root.parentSpanId) {
+      freshRoots += 1;
+      top = root;
+    } else if (parent && isLoadgenStep(parent) && !parent.parentSpanId) {
+      loadgenRooted += 1;
+      top = parent;
+    } else {
+      failures.push(`${where(trace, root)}: not rooted at a loadgen step or a fresh shop root`);
+      continue;
+    }
+    if (!CART_UUID.test(label(top, 'cart.id') ?? '')) {
+      failures.push(`${where(trace, top)}: root without cart.id`);
     }
   }
-  if (steps.size === 0) {
-    failures.push('no loadgen step spans exported (LOADGEN_TRACING off?)');
+  if (loadgenRooted === 0) {
+    failures.push('no request trace rooted at a loadgen step');
   }
   for (const step of LOADGEN_STEPS) {
-    if (steps.size > 0 && !steps.has(step)) {
+    if (!steps.has(step)) {
       failures.push(`no "cart ${step}" span`);
     }
   }
-  return result('loadgen root span per shopper step', failures, [...steps].join(', ') || 'none');
+  return result(
+    'request traces rooted at a loadgen step (or a fresh shop root), with cart.id',
+    failures,
+    `${loadgenRooted} loadgen-rooted, ${freshRoots} fresh roots; steps: ${[...steps].sort().join(', ')}`,
+  );
 }

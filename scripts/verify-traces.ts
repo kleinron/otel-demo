@@ -2,7 +2,7 @@
  * Live proof of the telemetry contract on the GCP deploy.
  *
  *   npx tsx scripts/verify-traces.ts [--project otel-demo-gcp] [--region me-west1]
- *     [--service otel-demo-shop] [--count 100] [--minutes 20] [--allow-missing-loadgen x]
+ *     [--service otel-demo-shop] [--count 100] [--minutes 20]
  *
  * Pulls the last `--count` request traces (plus the background traces in the
  * same window) for the serving revision from the Cloud Trace API, checks the
@@ -22,7 +22,7 @@ import {
   checkCartId,
   checkCollector,
   checkErrors,
-  checkLoadgenSteps,
+  checkRequestRoots,
   checkLogs,
   checkNoOrphans,
   checkPaymentKey,
@@ -168,11 +168,7 @@ const results: CheckResult[] = [
   checkLogs(logs.entries ?? [], knownSpans),
   checkCollector(collector.entries ?? []),
 ];
-const loadgen = checkLoadgenSteps(traces);
-// --allow-missing-loadgen reports this check as SKIP (exit code unaffected) while
-// the loadgen job cannot export spans yet.
-const skipLoadgen = 'allow-missing-loadgen' in args && !loadgen.pass;
-results.push(skipLoadgen ? { ...loadgen, name: `${loadgen.name} [SKIP]`, pass: true } : loadgen);
+results.push(checkRequestRoots(traces));
 
 console.log(`revision ${revision}`);
 for (const r of results) {

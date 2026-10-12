@@ -138,6 +138,18 @@ export async function runCart(options: CartTickOptions): Promise<CartResult> {
     };
   }
 
+  /**
+   * traceparent + baggage, plus the same span context in `x-otel-demo-parent`,
+   * which Cloud Run's front end does not rewrite; the shop parents on it.
+   */
+  function edgeHeaders(): Record<string, string> {
+    const headers = injectTraceHeaders({ baggage: `cart.id=${cartId}` });
+    if (headers.traceparent) {
+      headers['x-otel-demo-parent'] = headers.traceparent;
+    }
+    return headers;
+  }
+
   function call(
     operation: string,
     method: 'GET' | 'POST',
@@ -154,7 +166,7 @@ export async function runCart(options: CartTickOptions): Promise<CartResult> {
           method,
           headers: {
             accept: 'application/json',
-            ...injectTraceHeaders({ baggage: `cart.id=${cartId}` }),
+            ...edgeHeaders(),
             ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
             ...(options.authHeaders ? await options.authHeaders() : {}),
             ...headers,

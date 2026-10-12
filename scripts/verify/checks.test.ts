@@ -3,6 +3,7 @@ import {
   checkCartId,
   checkLogs,
   checkNoOrphans,
+  checkRequestRoots,
   checkSpanNames,
   checkSpanTree,
   checkSql,
@@ -18,8 +19,14 @@ function cartTrace(extra: Trace['spans'] = []): Trace {
     traceId: 't1',
     spans: [
       {
+        spanId: '0',
+        name: 'cart open-cart',
+        kind: 'RPC_CLIENT',
+        labels: { 'service.name': 'loadgen', 'cart.id': CART, 'cart.step': 'open-cart' },
+      },
+      {
         spanId: '1',
-        parentSpanId: '99',
+        parentSpanId: '0',
         name: 'POST /carts',
         kind: 'RPC_SERVER',
         labels: { ...base, 'http.route': '/carts', 'http.response.status_code': '201' },
@@ -48,12 +55,21 @@ function cartTrace(extra: Trace['spans'] = []): Trace {
 }
 
 describe('verify-traces checks', () => {
-  it('passes a complete open-cart trace with the Cloud Run front-end gap', () => {
+  it('passes a complete loadgen-rooted open-cart trace with zero orphans', () => {
     const trace = cartTrace();
     expect(checkSpanTree([trace]).pass).toBe(true);
     expect(checkNoOrphans([trace]).pass).toBe(true);
     expect(checkCartId([trace]).pass).toBe(true);
     expect(checkSpanNames([trace]).pass).toBe(true);
+    const roots = checkRequestRoots([trace]);
+    expect(roots.failures.filter((f) => !f.startsWith('no "cart'))).toEqual([]);
+  });
+
+  it('rejects a shop span whose parent is the Cloud Run front end', () => {
+    const trace = cartTrace();
+    trace.spans = trace.spans.filter((s) => s.spanId !== '0');
+    expect(checkNoOrphans([trace]).pass).toBe(false);
+    expect(checkRequestRoots([trace]).pass).toBe(false);
   });
 
   it('flags an orphan, a missing cart.id, a raw path, and a literal in SQL', () => {

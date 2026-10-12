@@ -54,6 +54,7 @@ describe('loadgen step spans', () => {
     ]);
     expect(spans.every((s) => s.parentSpanContext === undefined)).toBe(true);
     expect(spans.every((s) => s.attributes['cart.id'] === result.cartId)).toBe(true);
+    expect(sent.every((h) => h['x-otel-demo-parent'] === h.traceparent)).toBe(true);
     expect(sent.every((h) => h.traceparent && h.baggage === `cart.id=${result.cartId}`)).toBe(true);
     expect(logs.every((l) => typeof l['logging.googleapis.com/spanId'] === 'string')).toBe(true);
   });

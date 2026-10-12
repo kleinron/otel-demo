@@ -75,7 +75,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ? createHttpCatalog(options.inventoryUrl, timeoutMs, options.outbound, options.logger)
       : undefined);
   registerAccessLog(app, options.logger);
-  registerSpanLifecycle(app, SERVICE_NAME);
+  registerSpanLifecycle(app, SERVICE_NAME, { edge: true });
   app.addHook('onResponse', async (request, reply) => {
     options.metrics?.record({
       operation: routeOperation(request.routeOptions.url),
