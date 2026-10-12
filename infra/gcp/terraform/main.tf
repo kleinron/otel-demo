@@ -179,15 +179,16 @@ resource "google_cloud_run_v2_service" "shop" {
       }
     }
 
+    # A list, not a map, so shop stays the first container (the one with the port).
     dynamic "containers" {
-      for_each = local.app_containers
+      for_each = [for app in local.apps : merge(local.app_containers[app], { name = app })]
       content {
-        name    = containers.key
+        name    = containers.value.name
         image   = var.service_image
-        command = ["node", "services/${containers.key}/dist/index.js"]
+        command = ["node", "services/${containers.value.name}/dist/index.js"]
 
         dynamic "ports" {
-          for_each = containers.key == "shop" ? [3001] : []
+          for_each = containers.value.name == "shop" ? [3001] : []
           content {
             container_port = ports.value
           }
@@ -211,9 +212,9 @@ resource "google_cloud_run_v2_service" "shop" {
         # Sidecars listen on their default ports (3002, 3003, 3004).
         dynamic "env" {
           for_each = merge(local.common_env, {
-            OTEL_SERVICE_NAME = containers.key
-            DATABASE_URL      = local.database_urls[containers.key]
-          }, containers.key == "shop" ? local.shop_env : {})
+            OTEL_SERVICE_NAME = containers.value.name
+            DATABASE_URL      = local.database_urls[containers.value.name]
+          }, containers.value.name == "shop" ? local.shop_env : {})
           content {
             name  = env.key
             value = env.value
