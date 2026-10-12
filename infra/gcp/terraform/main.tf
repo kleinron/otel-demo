@@ -296,8 +296,10 @@ resource "google_cloud_scheduler_job" "hard_stop" {
     headers = {
       "Content-Type" = "application/json"
     }
+    # Same identity as the SQL stop jobs. The dedicated hard_stop SA lacks
+    # iam.serviceaccounts.actAs on the shop runtime SA, so its PATCH got 403.
     oauth_token {
-      service_account_email = google_service_account.hard_stop.email
+      service_account_email = var.sql_stop_service_account
       scope                 = "https://www.googleapis.com/auth/cloud-platform"
     }
   }
