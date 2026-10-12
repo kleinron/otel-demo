@@ -21,6 +21,7 @@ write_files:
     content: |
       [Unit]
       Description=Grafana (otel-demo)
+      StartLimitIntervalSec=0
       Wants=network-online.target
       After=network-online.target docker.service
       [Service]
@@ -39,22 +40,30 @@ write_files:
         ${grafana_image}
       ExecStop=/usr/bin/docker stop grafana
       Restart=always
+      RestartSec=10
       [Install]
       WantedBy=multi-user.target
   - path: /etc/grafana-otel/prestart.sh
     permissions: "0700"
     content: |
       set -euo pipefail
+      # Step markers (never values) on the serial console for debugging.
+      log() { echo "grafana-prestart: $*" > /dev/ttyS0 2>/dev/null || true; }
+      trap 'log "failed at line $LINENO: $BASH_COMMAND"' ERR
+      log start
       dev=/dev/disk/by-id/google-grafana-data
       blkid "$dev" >/dev/null || mkfs.ext4 -F "$dev"
       mkdir -p /mnt/disks/grafana
       mountpoint -q /mnt/disks/grafana || mount -o discard,defaults "$dev" /mnt/disks/grafana
       chown 472:0 /mnt/disks/grafana
+      log "data disk mounted"
       md=http://metadata.google.internal/computeMetadata/v1
       tok=$(curl -sf -H 'Metadata-Flavor: Google' "$md/instance/service-accounts/default/token" | sed -E 's/.*"access_token":"([^"]+)".*/\1/')
       pw=$(curl -sf -H "Authorization: Bearer $tok" \
         "https://secretmanager.googleapis.com/v1/projects/${project_id}/secrets/${secret_id}/versions/latest:access" \
         | sed -E 's/.*"data":"([^"]+)".*/\1/' | base64 -d)
+      [ -n "$pw" ] || { log "admin password empty"; exit 1; }
+      log "admin password read"
       mkdir -p /run/grafana-otel && umask 077
       printf 'GF_SECURITY_ADMIN_PASSWORD=%s\n' "$pw" > /run/grafana-otel/env
 runcmd:
