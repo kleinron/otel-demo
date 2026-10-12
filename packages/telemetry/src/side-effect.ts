@@ -114,7 +114,7 @@ async function record<T>(
     if (failure.level === 'warn') {
       logger.warn(fieldsWithFault, `${fields.action} ${failure.outcome}`);
     } else {
-      logger.error(fieldsWithFault, `${fields.action} failed`);
+      logger.error({ ...fieldsWithFault, ...errorFields(error) }, `${fields.action} failed`);
     }
     throw error;
   }
@@ -205,4 +205,42 @@ function isTimeoutError(error: unknown): boolean {
     return true;
   }
   return false;
+}
+
+const SAFE_MESSAGE =
+  /connection terminated|terminating connection|connection (?:refused|reset)|server closed the connection|timeout exceeded when trying to connect|connection error|not queryable|socket hang up|database system is|ECONN|ETIMEDOUT|EPIPE|ENOTFOUND|EAI_AGAIN|transaction aborted/i;
+
+/**
+ * Error name, driver code and, when it is safe, the message for an unexpected
+ * failure. A message is only logged when it carries a driver/system code or is
+ * a known connection-level message, so SQL text and row values stay out of logs.
+ */
+export function errorFields(error: unknown): {
+  error_name?: string;
+  error_code?: string;
+  error_message?: string;
+} {
+  const out: { error_name?: string; error_code?: string; error_message?: string } = {};
+  const describe = (value: unknown): string | undefined => {
+    if (!(value instanceof Error)) {
+      return undefined;
+    }
+    const code = (value as { code?: unknown }).code;
+    return typeof code === 'string' || SAFE_MESSAGE.test(value.message)
+      ? value.message.slice(0, 200)
+      : undefined;
+  };
+  if (error instanceof Error) {
+    out.error_name = error.name;
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === 'string') {
+      out.error_code = code;
+    }
+    const message = describe(error);
+    const cause = describe((error as { cause?: unknown }).cause);
+    if (message || cause) {
+      out.error_message = [message, cause && `cause: ${cause}`].filter(Boolean).join(' | ');
+    }
+  }
+  return out;
 }

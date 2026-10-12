@@ -1,4 +1,14 @@
-export { connectPg, createPgSql } from './pg.js';
+export {
+  connectPg,
+  createPgSql,
+  isTransientConnectionError,
+  TransactionAbortedError,
+  type PgPoolOptions,
+  type PoolClientLike,
+  type PoolLike,
+  type PgSql,
+  type PgSqlOptions,
+} from './pg.js';
 export {
   asInt,
   createSql,
@@ -12,3 +22,4 @@ export {
   type SqlOutcome,
   type SqlRows,
 } from './sql.js';
+export { migrateInBackground, type Readiness } from './readiness.js';

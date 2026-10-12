@@ -1,4 +1,4 @@
-import { connectPg } from '@otel-demo/db';
+import { createPgSql, migrateInBackground } from '@otel-demo/db';
 import { installSignalShutdown, listenHost, readPort, readTimeoutMs } from '@otel-demo/httpkit';
 import {
   createHttpMetrics,
@@ -26,9 +26,12 @@ const faults = await startServiceFaultControl(SERVICE_NAME, env, {
     logger.warn(fields ?? {}, message);
   },
 });
-const sql = await connectPg(requiredEnv(env.DATABASE_URL, 'DATABASE_URL'), {
+const sql = createPgSql(requiredEnv(env.DATABASE_URL, 'DATABASE_URL'), {
   timeoutMs: readTimeoutMs(env.DB_STATEMENT_TIMEOUT_MS, 5_000),
   beforeQuery: databaseFaultHook(faults, SERVICE_NAME),
+  onConnectionError(error) {
+    logger.warn({ err: error }, 'database connection error');
+  },
   onCall(event) {
     outbound.record({
       target: 'database',
@@ -37,13 +40,20 @@ const sql = await connectPg(requiredEnv(env.DATABASE_URL, 'DATABASE_URL'), {
     });
   },
 });
-await migrateDelivery(sql);
-const app = buildApp({ metrics, logger, sql, faults });
+// Do not block startup on the database: the server listens immediately and
+// /ready reports not-ready until the migration has run and the DB answers.
+const readiness = migrateInBackground(sql, migrateDelivery, {
+  onError(error, attempt) {
+    logger.warn({ err: error, attempt }, 'database migration pending');
+  },
+});
+const app = buildApp({ ready: () => readiness.ready(), metrics, logger, sql, faults });
 const port = readPort(env.PORT, DEFAULT_PORT);
 const host = listenHost(env);
 
 installSignalShutdown(async () => {
   faults.stop();
+  readiness.stop();
   await app.close();
   await sql.close();
   await telemetry.shutdown();

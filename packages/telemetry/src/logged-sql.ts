@@ -3,6 +3,7 @@ import type { Logger } from 'pino';
 import { outboundOperation } from './outbound.js';
 import {
   classifyFailure,
+  errorFields,
   ExpectedSideEffectFailure,
   insideSideEffect,
   withSideEffectLog,
@@ -53,6 +54,7 @@ function wrap(inner: SqlLike, logger: Logger): SqlLike {
               operation: outboundOperation(operation),
               outcome: failure.outcome,
               duration_ms: Math.max(0, Math.round(now() - started)),
+              ...errorFields(error),
             },
             'db-read failed',
           );

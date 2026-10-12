@@ -1,4 +1,4 @@
-import { connectPg, type Sql } from '@otel-demo/db';
+import { createPgSql, migrateInBackground, type PgSqlOptions, type Sql } from '@otel-demo/db';
 import { installSignalShutdown, listenHost, readPort, readTimeoutMs } from '@otel-demo/httpkit';
 import {
   createHttpMetrics,
@@ -22,7 +22,7 @@ export interface ShopHandle {
 export async function startShop(
   env: Record<string, string | undefined> = process.env,
   deps: {
-    connect?: (connectionString: string, options?: Parameters<typeof connectPg>[1]) => Promise<Sql>;
+    connect?: (connectionString: string, options?: PgSqlOptions) => Promise<Sql>;
   } = {},
 ): Promise<ShopHandle> {
   const telemetry = startTelemetry({ serviceName: SERVICE_NAME, env });
@@ -38,10 +38,14 @@ export async function startShop(
       logger.warn(fields ?? {}, message);
     },
   });
-  const connect = deps.connect ?? connectPg;
+  const connect =
+    deps.connect ?? (async (url: string, options?: PgSqlOptions) => createPgSql(url, options));
   const sql = await connect(requiredEnv(env.DATABASE_URL, 'DATABASE_URL'), {
     timeoutMs: readTimeoutMs(env.DB_STATEMENT_TIMEOUT_MS, 5_000),
     beforeQuery: databaseFaultHook(faults, SERVICE_NAME),
+    onConnectionError(error) {
+      logger.warn({ err: error }, 'database connection error');
+    },
     onCall(event) {
       outbound.record({
         target: 'database',
@@ -51,8 +55,14 @@ export async function startShop(
     },
   });
   try {
-    await migrateShop(sql);
+    // Do not block startup on the database; /ready reflects migration + DB state.
+    const readiness = migrateInBackground(sql, migrateShop, {
+      onError(error, attempt) {
+        logger.warn({ err: error, attempt }, 'database migration pending');
+      },
+    });
     const app = buildApp({
+      ready: () => readiness.ready(),
       metrics,
       outbound,
       logger,
@@ -75,6 +85,7 @@ export async function startShop(
       }
       closed = true;
       faults.stop();
+      readiness.stop();
       await app.close();
       await sql.close();
       await telemetry.shutdown();
