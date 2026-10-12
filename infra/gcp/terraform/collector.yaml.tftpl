@@ -6,9 +6,27 @@ receivers:
 processors:
   batch:
     timeout: 5s
+  # Metrics only: keep labels low-cardinality. The SDK already records only
+  # service / operation (route template) / method / status / outcome; this is a
+  # backstop so a per-request id can never become a metric label.
+  attributes/metrics_drop_ids:
+    actions:
+      - { key: cart.id, action: delete }
+      - { key: order.id, action: delete }
+      - { key: order_id, action: delete }
+      - { key: payment.idempotency_key, action: delete }
+      - { key: url.full, action: delete }
+      - { key: url.path, action: delete }
+  resource/metrics_drop_ids:
+    attributes:
+      - { key: cart.id, action: delete }
+      - { key: order.id, action: delete }
 exporters:
   googlecloud:
     project: ${project_id}
+    # OTel SDK metrics land as workload.googleapis.com/<name>.
+    metric:
+      prefix: workload.googleapis.com
 extensions:
   health_check:
     # All interfaces. A localhost bind is invisible to Cloud Run's TCP startup probe.
@@ -19,6 +37,10 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch]
+      exporters: [googlecloud]
+    metrics:
+      receivers: [otlp]
+      processors: [resource/metrics_drop_ids, attributes/metrics_drop_ids, batch]
       exporters: [googlecloud]
   telemetry:
     logs:
