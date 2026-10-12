@@ -82,6 +82,8 @@ resource "google_project_service" "required" {
       "artifactregistry.googleapis.com",
       "cloudscheduler.googleapis.com",
       "cloudtrace.googleapis.com",
+      # OTLP endpoint the loadgen job exports its step spans to.
+      "telemetry.googleapis.com",
       "secretmanager.googleapis.com",
       "logging.googleapis.com",
       "iam.googleapis.com",

@@ -14,28 +14,48 @@ import {
   logRequest,
   routeOperation,
 } from '@otel-demo/telemetry';
+import { EDGE_PARENT_HEADER, edgeParent } from './edge-parent.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 
 const spans = new WeakMap<FastifyRequest, Span>();
 const contexts = new WeakMap<FastifyRequest, Context>();
 
-export function registerSpanLifecycle(app: FastifyInstance, service: string): void {
+export interface SpanLifecycleOptions {
+  /**
+   * The public entry service (shop): parent from `x-otel-demo-parent`, else a
+   * fresh root linked to Cloud Run's context. Internal services keep `traceparent`.
+   */
+  edge?: boolean;
+}
+
+export function registerSpanLifecycle(
+  app: FastifyInstance,
+  service: string,
+  options: SpanLifecycleOptions = {},
+): void {
   const tracer = trace.getTracer(service);
 
   app.addHook('onRequest', async (request) => {
     const carrier = headerCarrier(request);
     // Never inherit ambient context (e.g. the startup span) for a new request.
-    const parent = extractTraceContext(carrier, ROOT_CONTEXT);
+    const extracted = extractTraceContext(carrier, ROOT_CONTEXT);
+    const edge = options.edge
+      ? edgeParent(extracted, carrier[EDGE_PARENT_HEADER])
+      : { parent: extracted, links: [], root: false, source: 'traceparent' as const };
+    const parent = edge.parent;
     const route = routeOperation(request.routeOptions.url);
     const span = tracer.startSpan(
       `${request.method} ${route}`,
       {
         kind: SpanKind.SERVER,
+        root: edge.root,
+        links: edge.links,
         attributes: {
           'otel-demo.service': service,
           'http.route': route,
           'http.request.method': request.method,
+          ...(options.edge ? { 'otel-demo.parent_source': edge.source } : {}),
         },
       },
       parent,

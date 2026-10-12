@@ -31,7 +31,8 @@
     "loadgen:start": "tsx scripts/loadgen-scale.ts 1",
     "loadgen:stop": "tsx scripts/loadgen-scale.ts 0",
     "image:build": "bash scripts/build-service-image.sh",
-    "verify:traces": "tsx scripts/verify-traces.ts"
+    "verify:traces": "tsx scripts/verify-traces.ts",
+    "sampling:check": "tsx scripts/sampling-check.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

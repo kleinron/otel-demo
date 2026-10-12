@@ -6,7 +6,10 @@ import {
   SpanKind,
   SpanStatusCode,
   trace,
+  type Attributes,
+  type Link,
   type Span,
+  type SpanContext,
 } from '@opentelemetry/api';
 import {
   customerId,
@@ -109,11 +112,22 @@ export async function runCart(options: CartTickOptions): Promise<CartResult> {
   // are no-ops and only the baggage header is sent, as before.
   const cartContext = withCartBaggage(cartId, ROOT_CONTEXT);
   const tracer = trace.getTracer('loadgen');
+  let lastSpan: SpanContext | undefined;
 
-  function step<T>(name: string, fn: (span: Span) => Promise<T>): Promise<T> {
+  // One trace per shopper step: a fresh root each time, no cart-level parent.
+  function step<T>(
+    name: string,
+    fn: (span: Span) => Promise<T>,
+    extra: { links?: Link[]; attributes?: Attributes } = {},
+  ): Promise<T> {
     return tracer.startActiveSpan(
       `cart ${name}`,
-      { kind: SpanKind.CLIENT, root: true, attributes: { 'cart.id': cartId, 'cart.step': name } },
+      {
+        kind: SpanKind.CLIENT,
+        root: true,
+        links: extra.links ?? [],
+        attributes: { 'cart.id': cartId, 'cart.step': name, ...extra.attributes },
+      },
       cartContext,
       async (span) => {
         try {
@@ -138,53 +152,71 @@ export async function runCart(options: CartTickOptions): Promise<CartResult> {
     };
   }
 
+  /**
+   * traceparent + baggage, plus the same span context in `x-otel-demo-parent`,
+   * which Cloud Run's front end does not rewrite; the shop parents on it.
+   */
+  function edgeHeaders(): Record<string, string> {
+    const headers = injectTraceHeaders({ baggage: `cart.id=${cartId}` });
+    if (headers.traceparent) {
+      headers['x-otel-demo-parent'] = headers.traceparent;
+    }
+    return headers;
+  }
+
   function call(
     operation: string,
     method: 'GET' | 'POST',
     path: string,
     body?: unknown,
     headers: Record<string, string> = {},
+    extra: { links?: Link[]; attributes?: Attributes } = {},
   ): Promise<{ status: number; body: unknown }> {
-    return step(operation, async (span) => {
-      const started = performance.now();
-      let status = 0;
-      span.setAttribute('http.request.method', method);
-      try {
-        const response = await doFetch(`${base}${path}`, {
-          method,
-          headers: {
-            accept: 'application/json',
-            ...injectTraceHeaders({ baggage: `cart.id=${cartId}` }),
-            ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-            ...(options.authHeaders ? await options.authHeaders() : {}),
-            ...headers,
-          },
-          body: body !== undefined ? JSON.stringify(body) : undefined,
-          signal: AbortSignal.timeout(30_000),
-        });
-        status = response.status;
-        span.setAttribute('http.response.status_code', status);
-        if (status >= 500) {
-          span.setStatus({ code: SpanStatusCode.ERROR, message: `HTTP ${status}` });
+    return step(
+      operation,
+      async (span) => {
+        lastSpan = span.spanContext();
+        const started = performance.now();
+        let status = 0;
+        span.setAttribute('http.request.method', method);
+        try {
+          const response = await doFetch(`${base}${path}`, {
+            method,
+            headers: {
+              accept: 'application/json',
+              ...edgeHeaders(),
+              ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+              ...(options.authHeaders ? await options.authHeaders() : {}),
+              ...headers,
+            },
+            body: body !== undefined ? JSON.stringify(body) : undefined,
+            signal: AbortSignal.timeout(30_000),
+          });
+          status = response.status;
+          span.setAttribute('http.response.status_code', status);
+          if (status >= 500) {
+            span.setStatus({ code: SpanStatusCode.ERROR, message: `HTTP ${status}` });
+          }
+          return { status, body: parse(await response.text()) };
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          span.recordException(err);
+          span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+          return { status: 0, body: undefined };
+        } finally {
+          log({
+            severity: status >= 500 || status === 0 ? 'WARNING' : 'INFO',
+            message: 'request',
+            ...traceFields(),
+            cart: { id: cartId },
+            operation,
+            status,
+            latencyMs: Math.round(performance.now() - started),
+          });
         }
-        return { status, body: parse(await response.text()) };
-      } catch (error) {
-        const err = error instanceof Error ? error : new Error(String(error));
-        span.recordException(err);
-        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
-        return { status: 0, body: undefined };
-      } finally {
-        log({
-          severity: status >= 500 || status === 0 ? 'WARNING' : 'INFO',
-          message: 'request',
-          ...traceFields(),
-          cart: { id: cartId },
-          operation,
-          status,
-          latencyMs: Math.round(performance.now() - started),
-        });
-      }
-    });
+      },
+      extra,
+    );
   }
 
   async function close(outcome: CartOutcome): Promise<CartResult> {
@@ -216,11 +248,31 @@ export async function runCart(options: CartTickOptions): Promise<CartResult> {
     await call('add-to-cart', 'POST', `${cartPath}/items`, { sku: pick(options.skus), qty: 1 });
   }
   const orderKey = `lg-${cartId}`;
+  let previousCheckout: SpanContext | undefined;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     checkoutAttempts = attempt;
-    const checkout = await call('checkout', 'POST', `${cartPath}/checkout`, undefined, {
-      'idempotency-key': orderKey,
-    });
+    // A retry is its own trace, linked to the failed attempt's span.
+    const failed = attempt > 1 ? previousCheckout : undefined;
+    const checkout = await call(
+      'checkout',
+      'POST',
+      `${cartPath}/checkout`,
+      undefined,
+      { 'idempotency-key': orderKey },
+      {
+        attributes: {
+          'cart.checkout_attempt': attempt,
+          ...(failed
+            ? {
+                'retry.previous_trace_id': failed.traceId,
+                'retry.previous_span_id': failed.spanId,
+              }
+            : {}),
+        },
+        links: failed ? [{ context: failed, attributes: { 'link.reason': 'retry-of' } }] : [],
+      },
+    );
+    previousCheckout = lastSpan;
     if (checkout.status >= 200 && checkout.status < 300) {
       return close('completed');
     }

@@ -101,6 +101,7 @@ describe('GCP terraform spike', () => {
       'roles/iam.serviceAccountTokenCreator',
       'roles/pubsub.publisher',
       'roles/run.developer',
+      'roles/run.invoker',
       'roles/secretmanager.secretAccessor',
     ]);
   });

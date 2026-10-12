@@ -24,3 +24,10 @@ export {
   routeParam,
   spanOf,
 } from './spans.js';
+export {
+  EDGE_PARENT_HEADER,
+  edgeParent,
+  parseTraceparent,
+  type EdgeParent,
+} from './edge-parent.js';
+export type { SpanLifecycleOptions } from './spans.js';
