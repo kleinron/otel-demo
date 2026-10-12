@@ -50,16 +50,6 @@ for (let i = 0; i < count; i += 1) {
   const cartId = randomUUID();
   const start = new Date();
   const parent = `00-${traceId}-${spanId}-00`;
-  const response = await fetch(`${service.uri}/carts/${randomUUID()}`, {
-    headers: {
-      authorization: `Bearer ${idToken}`,
-      accept: 'application/json',
-      traceparent: parent,
-      'x-otel-demo-parent': parent,
-      baggage: `cart.id=${cartId}`,
-    },
-  });
-  await response.text();
   await api(`https://cloudtrace.googleapis.com/v2/projects/${project}/traces:batchWrite`, {
     method: 'POST',
     body: JSON.stringify({
@@ -84,6 +74,17 @@ for (let i = 0; i < count; i += 1) {
       ],
     }),
   });
+  // Parent span first, so an interrupted run never leaves an orphan.
+  const response = await fetch(`${service.uri}/carts/${randomUUID()}`, {
+    headers: {
+      authorization: `Bearer ${idToken}`,
+      accept: 'application/json',
+      traceparent: parent,
+      'x-otel-demo-parent': parent,
+      baggage: `cart.id=${cartId}`,
+    },
+  });
+  await response.text();
   probes.push({ traceId, spanId, status: response.status });
 }
 
