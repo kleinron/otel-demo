@@ -76,6 +76,14 @@ panels.append({
                  "queryText": LOG_BASE + ' trace="projects/$project/traces/$trace_id"'}],
     "options": {"showTime": True, "enableLogDetails": True, "dedupStrategy": "none", "sortOrder": "Ascending"},
 }); pid += 1; y += 8
+# Trace waterfall for $trace_id (on AWS this was a link to X-Ray).
+GCT = {"type": "googlecloud-trace-datasource", "uid": "gct"}
+panels.append({
+    "id": pid, "type": "traces", "title": "trace $trace_id",
+    "datasource": GCT, "gridPos": {"h": 12, "w": 24, "x": 0, "y": y},
+    "targets": [{"refId": "A", "datasource": GCT, "projectId": "$project",
+                 "queryType": "traceID", "traceId": "$trace_id", "queryText": "$trace_id"}],
+}); pid += 1; y += 12
 # AWS "errors by service last 15m" (stats count() by service) -> error lines, last 15m.
 # Cloud Logging cannot aggregate in-query; the logs volume histogram plus the
 # service label give the per-service split.
