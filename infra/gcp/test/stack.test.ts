@@ -99,6 +99,7 @@ describe('GCP terraform spike', () => {
       'roles/cloudsql.client',
       'roles/cloudtrace.agent',
       'roles/iam.serviceAccountTokenCreator',
+      'roles/iam.serviceAccountUser',
       'roles/monitoring.metricWriter',
       'roles/pubsub.publisher',
       'roles/run.developer',
@@ -162,10 +163,13 @@ describe('GCP terraform spike', () => {
 
 describe('grafana (draft)', () => {
   const tf = readFileSync(new URL('../terraform/grafana.tf', import.meta.url), 'utf8');
-  it('grants the Grafana SA read-only telemetry roles only', () => {
+  it('grants only the approved Grafana and deployer roles', () => {
     const roles = [...tf.matchAll(/"(roles\/[^"]+)"/g)].map((m) => m[1]).sort();
     expect(roles).toEqual([
       'roles/cloudtrace.user',
+      'roles/compute.instanceAdmin.v1',
+      'roles/compute.securityAdmin',
+      'roles/iam.serviceAccountUser',
       'roles/logging.viewer',
       'roles/monitoring.viewer',
       'roles/secretmanager.secretAccessor',
