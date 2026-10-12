@@ -1385,6 +1385,34 @@
     },
     {
       "id": 33,
+      "type": "traces",
+      "title": "trace $trace_id",
+      "datasource": {
+        "type": "googlecloud-trace-datasource",
+        "uid": "gct"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "googlecloud-trace-datasource",
+            "uid": "gct"
+          },
+          "projectId": "$project",
+          "queryType": "traceID",
+          "traceId": "$trace_id",
+          "queryText": "$trace_id"
+        }
+      ]
+    },
+    {
+      "id": 34,
       "type": "logs",
       "title": "errors by service last 15m",
       "datasource": {
@@ -1396,7 +1424,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 43
+        "y": 55
       },
       "targets": [
         {
