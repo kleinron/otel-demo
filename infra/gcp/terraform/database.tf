@@ -84,7 +84,18 @@ resource "google_secret_manager_secret_version" "db_password" {
 }
 
 locals {
+  # Service containers: no password in the URL. node-postgres falls back to
+  # PGPASSWORD, which Cloud Run injects from the app's Secret Manager secret.
+  database_urls_no_password = {
+    for app in local.apps : app => format(
+      "postgres://%s@localhost/%s?host=/cloudsql/%s",
+      app,
+      app,
+      google_sql_database_instance.app[app].connection_name,
+    )
+  }
   # Unix socket through the Cloud SQL connector volume mounted at /cloudsql.
+  # Still used by the seed job (one container, four databases).
   database_urls = {
     for app in local.apps : app => format(
       "postgres://%s:%s@localhost/%s?host=/cloudsql/%s",
@@ -140,4 +151,14 @@ resource "google_cloud_scheduler_job" "sql_hard_stop" {
   }
 
   depends_on = [google_project_service.required]
+}
+
+# Approved (Ron, 2026-10-12): the app runtime account reads only the four DB
+# password secrets, at secret level.
+resource "google_secret_manager_secret_iam_member" "db_password_accessor" {
+  for_each = toset(local.apps)
+
+  secret_id = google_secret_manager_secret.db_password[each.key].id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.shop.email}"
 }

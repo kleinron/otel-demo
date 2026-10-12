@@ -240,11 +240,22 @@ resource "google_cloud_run_v2_service" "shop" {
         dynamic "env" {
           for_each = merge(local.common_env, {
             OTEL_SERVICE_NAME = containers.value.name
-            DATABASE_URL      = local.database_urls[containers.value.name]
+            DATABASE_URL      = local.database_urls_no_password[containers.value.name]
           }, containers.value.name == "shop" ? local.shop_env : {})
           content {
             name  = env.key
             value = env.value
+          }
+        }
+
+        # DB password from Secret Manager (pinned version), never plaintext env.
+        env {
+          name = "PGPASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.db_password[containers.value.name].secret_id
+              version = google_secret_manager_secret_version.db_password[containers.value.name].version
+            }
           }
         }
 
@@ -297,6 +308,7 @@ resource "google_cloud_run_v2_service" "shop" {
     google_cloud_scheduler_job.hard_stop,
     google_cloud_scheduler_job.sql_hard_stop,
     google_project_iam_member.cloudsql_client,
+    google_secret_manager_secret_iam_member.db_password_accessor,
   ]
 }
 
