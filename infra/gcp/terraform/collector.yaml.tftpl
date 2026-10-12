@@ -11,7 +11,8 @@ exporters:
     project: ${project_id}
 extensions:
   health_check:
-    endpoint: localhost:13133
+    # All interfaces. A localhost bind is invisible to Cloud Run's TCP startup probe.
+    endpoint: ${health_bind}
 service:
   extensions: [health_check]
   pipelines:
@@ -21,4 +22,4 @@ service:
       exporters: [googlecloud]
   telemetry:
     logs:
-      level: error
+      level: ${collector_log_level}

@@ -1,6 +1,6 @@
 variable "project_id" {
   type        = string
-  description = "GCP project id for this spike. Not a project number."
+  description = "Required. GCP project id for this spike. Not a project number. See terraform.tfvars.example."
 }
 
 variable "region" {
@@ -20,13 +20,20 @@ variable "scheduler_region" {
   description = "Cloud Scheduler region. Empty uses var.region (me-west1 by default). Set europe-west1 only as a fallback if the job cannot be created in the chosen region."
 }
 
+variable "create_budget" {
+  type        = bool
+  default     = false
+  description = "When true, create the billing budget and the Pub/Sub topic otel-demo-budget-alerts, and enable the Pub/Sub and billing-budget APIs. Default false so apply does not need those permissions."
+}
+
 variable "billing_account" {
   type        = string
-  description = "Billing account id (XXXXXX-XXXXXX-XXXXXX). Do not commit a filled tfvars file."
+  default     = ""
+  description = "Billing account id (XXXXXX-XXXXXX-XXXXXX). Required only when create_budget is true. Leave empty otherwise. Do not commit a filled tfvars file."
 
   validation {
-    condition     = can(regex("^[A-Z0-9]{6}-[A-Z0-9]{6}-[A-Z0-9]{6}$", var.billing_account))
-    error_message = "billing_account must look like XXXXXX-XXXXXX-XXXXXX."
+    condition     = var.billing_account == "" || can(regex("^[A-Z0-9]{6}-[A-Z0-9]{6}-[A-Z0-9]{6}$", var.billing_account))
+    error_message = "billing_account must be empty, or look like XXXXXX-XXXXXX-XXXXXX."
   }
 }
 
@@ -54,7 +61,18 @@ variable "hard_stop_utc" {
 
 variable "shop_image" {
   type        = string
-  description = "Shop container image in Artifact Registry. Build and push it before apply. Cloud Run must be able to run its architecture."
+  description = "Required. Shop container image in Artifact Registry. Build and push it before apply. Cloud Run must be able to run its architecture. See terraform.tfvars.example."
+}
+
+variable "collector_log_level" {
+  type        = string
+  default     = "error"
+  description = "Collector telemetry log level. Default error. Set info to raise it."
+
+  validation {
+    condition     = contains(["error", "info"], var.collector_log_level)
+    error_message = "collector_log_level must be error or info."
+  }
 }
 
 variable "collector_image" {

@@ -35,6 +35,10 @@ describe('GCP terraform spike', () => {
     expect(text).toContain('name  = "collector"');
     expect(text).toContain('exporters: [googlecloud]');
     expect(text).toContain('endpoint: localhost:4318');
+    expect(text).toContain('endpoint: ${health_bind}');
+    expect(text).not.toContain('endpoint: localhost:13133');
+    expect(text).toContain('deletion_protection = false');
+    expect(text).not.toContain('name  = "PORT"');
     expect(text).toContain('LOG_FORMAT');
     expect(text).toContain('CLOUD_PROVIDER');
     expect(text).toContain('value = "gcp"');
@@ -49,10 +53,29 @@ describe('GCP terraform spike', () => {
     expect(text).toContain('default     = "2026-10-14T00:00:00Z"');
     expect(text).toContain('resource "google_cloud_scheduler_job" "hard_stop"');
     expect(text).toContain('manualInstanceCount = 0');
+    expect(text).toContain('scalingMode         = "MANUAL"');
+    expect(text).toContain('updateMask=scaling.scalingMode,scaling.manualInstanceCount');
+    expect(text).toContain('count  = var.create_budget ? 1 : 0');
+    expect(text).toContain('default     = false');
+    expect(text).toContain('default     = "error"');
+    expect(text).toContain('level: ${collector_log_level}');
     expect(text).toContain('default     = "me-west1"');
     expect(text).toContain('europe-west1');
     expect(text).toContain('me-west1');
     expect(hardStopCron('2026-10-14T00:00:00Z')).toBe('0 0 14 10 *');
+
+    const service = text.slice(
+      text.indexOf('resource "google_cloud_run_v2_service" "shop"'),
+      text.indexOf('resource "google_cloud_scheduler_job" "hard_stop"'),
+    );
+    expect(service).toContain('google_cloud_scheduler_job.hard_stop');
+
+    const scheduler = text.slice(text.indexOf('resource "google_cloud_scheduler_job" "hard_stop"'));
+    const schedulerDepends = scheduler.slice(
+      scheduler.indexOf('depends_on'),
+      scheduler.indexOf('resource "google_pubsub_topic" "budget"'),
+    );
+    expect(schedulerDepends).not.toContain('google_cloud_run_v2_service.shop');
   });
 
   it('keeps secrets and addresses out of the spike files', () => {
@@ -75,5 +98,26 @@ describe('GCP terraform spike', () => {
     expect(docs).toContain('gcloud run services list');
     expect(docs).toContain('JSON');
     expect(docs).toMatch(/delete it when the spike is over/i);
+    expect(docs).toContain('project_id');
+    expect(docs).toContain('shop_image');
+    expect(docs).toContain('create_budget');
+    expect(docs).toContain('collector_log_level');
+    expect(docs).toContain('scalingMode');
+    expect(docs).toContain('deletion_protection');
+    expect(docs).toContain('roles/run.admin');
+    expect(docs).toContain('roles/artifactregistry.admin');
+    expect(docs).toContain('roles/cloudbuild.builds.editor');
+    expect(docs).toContain('roles/storage.admin');
+    expect(docs).toContain('roles/iam.serviceAccountAdmin');
+    expect(docs).toContain('roles/resourcemanager.projectIamAdmin');
+    expect(docs).toContain('roles/secretmanager.admin');
+    expect(docs).toContain('roles/cloudscheduler.admin');
+    expect(docs).toContain('roles/logging.viewer');
+    expect(docs).toContain('roles/cloudtrace.user');
+    expect(docs).toContain('roles/storage.objectViewer');
+    expect(docs).toContain('roles/artifactregistry.writer');
+    expect(docs).toContain('roles/logging.logWriter');
+    expect(docs).toContain('constraints/iam.disableServiceAccountKeyCreation');
+    expect(docs).toContain('constraints/iam.managed.disableServiceAccountKeyCreation');
   });
 });

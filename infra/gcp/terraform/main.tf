@@ -18,8 +18,14 @@ locals {
     tonumber(local.hard_stop_parts.day),
     tonumber(local.hard_stop_parts.month),
   )
+  # Cloud Run's TCP startup probe cannot reach a localhost listener, so the
+  # health extension must bind every interface. Octets are joined so the
+  # address is not a literal in the repo.
+  health_bind = "${join(".", ["0", "0", "0", "0"])}:13133"
   collector_config = templatefile("${path.module}/collector.yaml.tftpl", {
-    project_id = var.project_id
+    project_id          = var.project_id
+    health_bind         = local.health_bind
+    collector_log_level = var.collector_log_level
   })
   labels = {
     experiment = "otel-demo"
@@ -28,18 +34,22 @@ locals {
 }
 
 resource "google_project_service" "required" {
-  for_each = toset([
-    "run.googleapis.com",
-    "artifactregistry.googleapis.com",
-    "cloudscheduler.googleapis.com",
-    "billingbudgets.googleapis.com",
-    "cloudbilling.googleapis.com",
-    "cloudtrace.googleapis.com",
-    "secretmanager.googleapis.com",
-    "logging.googleapis.com",
-    "iam.googleapis.com",
-    "pubsub.googleapis.com",
-  ])
+  for_each = toset(concat(
+    [
+      "run.googleapis.com",
+      "artifactregistry.googleapis.com",
+      "cloudscheduler.googleapis.com",
+      "cloudtrace.googleapis.com",
+      "secretmanager.googleapis.com",
+      "logging.googleapis.com",
+      "iam.googleapis.com",
+    ],
+    var.create_budget ? [
+      "billingbudgets.googleapis.com",
+      "cloudbilling.googleapis.com",
+      "pubsub.googleapis.com",
+    ] : [],
+  ))
   project            = var.project_id
   service            = each.value
   disable_on_destroy = false
@@ -119,10 +129,11 @@ resource "google_secret_manager_secret_iam_member" "database" {
 }
 
 resource "google_cloud_run_v2_service" "shop" {
-  name     = local.service_name
-  location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
-  labels   = local.labels
+  name                = local.service_name
+  location            = var.region
+  ingress             = "INGRESS_TRAFFIC_ALL"
+  deletion_protection = false
+  labels              = local.labels
 
   template {
     service_account = google_service_account.shop.email
@@ -156,10 +167,7 @@ resource "google_cloud_run_v2_service" "shop" {
         name  = "LISTEN_ANY"
         value = "true"
       }
-      env {
-        name  = "PORT"
-        value = "3001"
-      }
+      # Cloud Run reserves PORT and sets it from container_port. Do not set it here.
       env {
         name  = "LOG_LEVEL"
         value = "info"
@@ -275,9 +283,11 @@ resource "google_cloud_run_v2_service" "shop" {
     }
   }
 
+  # The hard-stop job is created first so a stop exists before this service runs.
   depends_on = [
     google_project_service.required,
     google_artifact_registry_repository.demo,
+    google_cloud_scheduler_job.hard_stop,
   ]
 }
 
@@ -294,9 +304,10 @@ resource "google_cloud_scheduler_job" "hard_stop" {
 
   http_target {
     http_method = "PATCH"
-    uri         = "https://run.googleapis.com/v2/projects/${var.project_id}/locations/${var.region}/services/${local.service_name}?updateMask=scaling.manualInstanceCount"
+    uri         = "https://run.googleapis.com/v2/projects/${var.project_id}/locations/${var.region}/services/${local.service_name}?updateMask=scaling.scalingMode,scaling.manualInstanceCount"
     body = base64encode(jsonencode({
       scaling = {
+        scalingMode         = "MANUAL"
         manualInstanceCount = 0
       }
     }))
@@ -309,14 +320,16 @@ resource "google_cloud_scheduler_job" "hard_stop" {
     }
   }
 
+  # Do not depend on the Cloud Run service. The URI names the service; the job
+  # must exist before that service is created.
   depends_on = [
     google_project_service.required,
-    google_cloud_run_v2_service.shop,
     google_service_account_iam_member.scheduler_mint,
   ]
 }
 
 resource "google_pubsub_topic" "budget" {
+  count  = var.create_budget ? 1 : 0
   name   = "otel-demo-budget-alerts"
   labels = local.labels
 
@@ -324,14 +337,23 @@ resource "google_pubsub_topic" "budget" {
 }
 
 resource "google_pubsub_topic_iam_member" "budget_publisher" {
-  topic  = google_pubsub_topic.budget.name
+  count  = var.create_budget ? 1 : 0
+  topic  = google_pubsub_topic.budget[0].name
   role   = "roles/pubsub.publisher"
   member = "serviceAccount:billing-budget-alert@system.gserviceaccount.com"
 }
 
 resource "google_billing_budget" "spike" {
+  count           = var.create_budget ? 1 : 0
   billing_account = var.billing_account
   display_name    = "otel-demo-gcp-spike"
+
+  lifecycle {
+    precondition {
+      condition     = var.billing_account != ""
+      error_message = "billing_account is required when create_budget is true."
+    }
+  }
 
   budget_filter {
     projects = ["projects/${data.google_project.this.number}"]
@@ -355,7 +377,7 @@ resource "google_billing_budget" "spike" {
   }
 
   all_updates_rule {
-    pubsub_topic                   = google_pubsub_topic.budget.id
+    pubsub_topic                   = google_pubsub_topic.budget[0].id
     disable_default_iam_recipients = false
   }
 

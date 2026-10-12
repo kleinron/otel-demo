@@ -24,6 +24,6 @@ output "fault_switch_secret" {
 }
 
 output "budget_display_name" {
-  value       = google_billing_budget.spike.display_name
-  description = "Billing budget display name. The budget is attached to the billing account."
+  value       = var.create_budget ? google_billing_budget.spike[0].display_name : ""
+  description = "Billing budget display name when create_budget is true. Empty otherwise."
 }

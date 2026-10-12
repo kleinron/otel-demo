@@ -8,28 +8,61 @@ Terraform lives in `infra/gcp/terraform`. The fault-switch selector is `@otel-de
 
 - Artifact Registry docker repository `otel-demo`.
 - One Cloud Run service, `otel-demo-shop`, with a collector sidecar. Minimum instances is 1. CPU is always allocated (`cpu_idle = false`) on both containers, so the sidecar is not frozen between requests. Maximum instances defaults to 1.
-- The shop process logs with `LOG_FORMAT=gcp` and `CLOUD_PROVIDER=gcp`. Traces go to the sidecar at `http://localhost:4318`. The sidecar's `googlecloud` exporter writes them to Cloud Trace.
+- The shop process logs with `LOG_FORMAT=gcp` and `CLOUD_PROVIDER=gcp`. Traces go to the sidecar at `http://localhost:4318`. The sidecar's `googlecloud` exporter writes them to Cloud Trace. The shop container sets `container_port` to 3001 and does not set a `PORT` environment variable. Cloud Run reserves `PORT` and sets it from that container port. `deletion_protection` is false so `terraform destroy` can delete the service.
+- The collector health extension listens on all interfaces, port 13133. Cloud Run's TCP startup probe connects to that port from outside the container's localhost, so a localhost bind never becomes ready and the revision does not start. Terraform joins the address octets and passes the result into the collector config as `health_bind`. Collector telemetry logs default to `error`. Set `collector_log_level` to `info` to raise them.
 - Secret Manager secret `otel-demo-faults-enabled`, created as `off`.
-- A billing budget on the billing account, filtered to this project. The amount is `budget_amount_usd`, default 25 USD, with alerts at 50%, 90%, and 100%. Billing account admins receive the email. The same alerts are published to the Pub/Sub topic `otel-demo-budget-alerts`.
-- A Cloud Scheduler job that, at `hard_stop_utc` (default `2026-10-14T00:00:00Z`), patches the service so `scaling.manualInstanceCount` is 0.
+- A billing budget, only when `create_budget` is true. The default is false. When it is false, Terraform creates neither the Pub/Sub topic `otel-demo-budget-alerts` nor the budget, and it does not enable the Pub/Sub or billing-budget APIs. When it is true, the budget is on the billing account, filtered to this project. The amount is `budget_amount_usd`, default 25 USD, with alerts at 50%, 90%, and 100%. Billing account admins receive the email. The same alerts are published to that topic. `billing_account` is required only in that case.
+- A Cloud Scheduler job that, at `hard_stop_utc` (default `2026-10-14T00:00:00Z`), patches the service so `scaling.scalingMode` is `MANUAL` and `scaling.manualInstanceCount` is 0. Both fields are in the update mask. The job does not depend on the Cloud Run service. The service depends on the job, so the hard stop exists before the revision runs.
 
 `region` defaults to `me-west1` (Tel Aviv). Set it to `europe-west1` (Belgium) to place the spike there instead. `scheduler_region` follows `region` when it is empty. Set `scheduler_region` to `europe-west1` only if the Scheduler job cannot be created in the chosen region. The locations page lists Cloud Scheduler in `me-west1`, so the default job stays in Tel Aviv. The schedule is minute resolution in UTC. `2026-10-14T00:00:00Z` is cron `0 0 14 10 *`.
 
 The fault-switch secret uses user-managed replication in `region`, so its versions are stored in Tel Aviv unless you override the region.
 
-## Before apply
+## Required variables
 
-You need a project, billing, and permission to enable APIs, deploy Cloud Run, write Artifact Registry, create a budget, and create a Scheduler job.
+`project_id` and `shop_image` have no default. Everything else can be left at its default for a first apply.
 
-Prefer user credentials (`gcloud auth login` and `gcloud auth application-default login`). Do not create a JSON service-account key unless something you are using cannot take Application Default Credentials. See [Key hygiene](#key-hygiene).
-
-Copy the example variables and fill them locally. That file is gitignored.
+Copy the example and fill those two locally. The copy is gitignored.
 
 ```bash
 cp infra/gcp/terraform/terraform.tfvars.example infra/gcp/terraform/terraform.tfvars
 ```
 
-Set `project_id`, `billing_account`, `region`, and `shop_image`.
+```hcl
+project_id = "your-project-id"
+shop_image = "me-west1-docker.pkg.dev/your-project-id/otel-demo/shop:spike"
+```
+
+`project_id` is the project id, not the project number. `shop_image` is the Artifact Registry image Cloud Run will run. Push it before apply. The registry host must match `region` (`me-west1-docker.pkg.dev` for the default). The full example, including the optional budget and collector log settings, is `infra/gcp/terraform/terraform.tfvars.example`.
+
+`region` defaults to `me-west1`. Set `europe-west1` only as a fallback. Leave `create_budget` false unless you want the budget. Leave `collector_log_level` unset to keep collector logs at `error`.
+
+## Access
+
+The identity that runs Terraform and pushes the image needs these project roles:
+
+| Role                                    | Used for                                       |
+| --------------------------------------- | ---------------------------------------------- |
+| `roles/run.admin`                       | Cloud Run service                              |
+| `roles/artifactregistry.admin`          | Docker repository                              |
+| `roles/cloudbuild.builds.editor`        | Cloud Build, when the image is built that way  |
+| `roles/storage.admin`                   | Cloud Build source uploads and build artifacts |
+| `roles/iam.serviceAccountAdmin`         | Shop and hard-stop service accounts            |
+| `roles/resourcemanager.projectIamAdmin` | Project IAM bindings for those accounts        |
+| `roles/secretmanager.admin`             | Fault-switch secret                            |
+| `roles/cloudscheduler.admin`            | Hard-stop job                                  |
+| `roles/logging.viewer`                  | Log Explorer                                   |
+| `roles/cloudtrace.user`                 | The view-trace link                            |
+
+`roles/resourcemanager.projectIamAdmin` is the projectIamAdmin role.
+
+Cloud Build's default compute service account (`PROJECT_NUMBER-compute@developer.gserviceaccount.com`) needs `roles/storage.objectViewer`, `roles/artifactregistry.writer`, and `roles/logging.logWriter` so a build can read its source, push the image, and write logs.
+
+Prefer user credentials (`gcloud auth login` and `gcloud auth application-default login`). Do not create a JSON service-account key unless something you are using cannot take Application Default Credentials. See [Key hygiene](#key-hygiene).
+
+## Before apply
+
+You need a project and billing on that project. A budget resource is optional (`create_budget`).
 
 Shop will not listen until `DATABASE_URL` is set. The AWS image builds that URL from database parts. This spike does not create a database (a Cloud SQL instance would spend the budget on its own). Create a secret yourself and pass its id as `database_secret`:
 
@@ -53,9 +86,9 @@ docker push "$SHOP_IMAGE"
 
 The AWS Dockerfile refuses any build that is not `linux/arm64`, because Fargate in this demo is ARM. That check is unchanged. If Cloud Run in the chosen region only runs amd64, that Dockerfile will reject the build. Confirm the region's supported architectures before you rely on this command. Do not weaken the AWS check to make the spike build.
 
-The collector image defaults to `otel/opentelemetry-collector-contrib:0.128.0`. The `googlecloud` exporter is part of the contrib distribution, not the core `otel/opentelemetry-collector` image. Confirm the tag still ships that exporter (`googlecloud` on the traces pipeline) before apply. The config is passed with `--config=env:OTEL_COLLECTOR_CONFIG`.
+The collector image defaults to `otel/opentelemetry-collector-contrib:0.128.0`. The `googlecloud` exporter is part of the contrib distribution, not the core `otel/opentelemetry-collector` image. Confirm the tag still ships that exporter (`googlecloud` on the traces pipeline) before apply. The config is passed with `--config=env:OTEL_COLLECTOR_CONFIG`. Telemetry logs in that config default to `error`.
 
-Cloud Run multi-container (the shop process plus the collector sidecar) has to be available for the service resource. Containers share localhost, so the collector listens on `localhost:4318` and shop exports there.
+Cloud Run multi-container (the shop process plus the collector sidecar) has to be available for the service resource. Containers share localhost, so the OTLP receiver stays on `localhost:4318` and shop exports there. The health extension does not. It listens on all interfaces, port 13133, because the startup probe is a TCP check Cloud Run makes against the container port and a localhost socket never accepts it.
 
 ## Deploy
 
@@ -114,7 +147,7 @@ Delete the project. That removes Cloud Run, Artifact Registry, Scheduler, secret
 gcloud projects delete "$PROJECT_ID"
 ```
 
-The budget is on the billing account, not inside the project, so it can outlive the project. List it and delete it if it is still there:
+The budget, when `create_budget` was true, is on the billing account, not inside the project, so it can outlive the project. List it and delete it if it is still there:
 
 ```bash
 gcloud billing budgets list --billing-account="$BILLING_ACCOUNT"
@@ -145,7 +178,8 @@ gcloud iam service-accounts keys delete "$KEY_ID" --iam-account="$SERVICE_ACCOUN
 rm -f "$KEY_FILE"
 ```
 
-- Do not put the key contents in a shell history you share, a log, or a pull request. `gitleaks` runs on pull requests and rejects private keys, AWS account ids, and IP addresses.
+- Creating that key also requires an org-policy override. Both the legacy constraint `constraints/iam.disableServiceAccountKeyCreation` and the managed constraint `constraints/iam.managed.disableServiceAccountKeyCreation` block key creation until they are overridden for the project or the organization. Prefer Application Default Credentials and skip the key.
+- Do not put the key contents in a shell history you share, a log, or a pull request. `gitleaks` runs on pull requests and rejects private keys, AWS account ids, and IP addresses. The health bind is assembled in Terraform so the all-interfaces address is not written as a literal.
 - Application Default Credentials from `gcloud auth application-default login` are stored outside the repo. Revoke them with `gcloud auth application-default revoke` when you are finished.
 
 ## Region check (me-west1)
@@ -171,11 +205,22 @@ Gaps:
 - The collector sends traces to the Cloud Trace API. It does not set an observability-bucket location. Unless the project default for observability buckets is `me-west1`, trace storage may be somewhere else. https://cloud.google.com/trace/docs/storage-overview
 - The fault-switch secret is user-managed in `region`. A `database_secret` you create outside terraform is stored wherever that secret's replication policy says.
 
+## Live spike
+
+Checked on a real apply. Folded into this terraform:
+
+- The collector `health_check` extension must listen on all interfaces, port 13133. `localhost:13133` fails Cloud Run's TCP startup probe and the revision never starts.
+- Collector telemetry logs default to `error`. `info` is opt-in through `collector_log_level`.
+- The hard-stop PATCH sets `scalingMode` to `MANUAL` and `manualInstanceCount` to 0, and the update mask names both fields. `manualInstanceCount` alone is likely rejected. The Scheduler job is created before the Cloud Run service and does not depend on it.
+- `deletion_protection` is false.
+- `PORT` is not set. `container_port` is 3001, and Cloud Run sets `PORT` from it.
+- The Pub/Sub budget topic and the billing budget exist only when `create_budget` is true.
+
 ## Assumptions to verify
 
 - `cpu_idle = false` keeps CPU allocated for both containers in `me-west1`. The locations pages do not mention that setting.
 - `otel/opentelemetry-collector-contrib:0.128.0` still contains the `googlecloud` exporter and still accepts `--config=env:OTEL_COLLECTOR_CONFIG`.
-- Cloud Scheduler can `PATCH` the Cloud Run Admin API with `updateMask=scaling.manualInstanceCount` and a body of `{ "scaling": { "manualInstanceCount": 0 } }`, and that scales the service to zero. The hard-stop service account has `roles/run.developer` and the Scheduler service agent can mint its token. The locations page lists the service in `me-west1`; it does not document this API call.
+- Cloud Scheduler's PATCH of `scaling.scalingMode=MANUAL` together with `scaling.manualInstanceCount=0` is accepted by the Cloud Run Admin API and scales the service to zero. The hard-stop service account has `roles/run.developer` and the Scheduler service agent can mint its token. The locations page lists the service in `me-west1`; it does not document this API call.
 - The shop image's architecture matches Cloud Run. The AWS Dockerfile only builds `linux/arm64`.
 - A useful log line needs `DATABASE_URL` in Secret Manager (`database_secret`). This terraform does not create a database.
 - `roles/run.developer` is enough for the hard-stop account to patch scaling. If the API returns a permission error, the account needs `roles/run.admin` instead.
