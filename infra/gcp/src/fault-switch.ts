@@ -4,9 +4,12 @@ import {
   type SsmParameterClient,
 } from '@otel-demo/infra-aws/fault-switch';
 
+/** `true` = all faults, `false` = none, a list = only those fault ids. */
+export type FaultSwitchValue = boolean | readonly string[];
+
 /** Same reader shape the services already poll. */
 export interface FaultSwitchReader {
-  read(): Promise<boolean>;
+  read(): Promise<FaultSwitchValue>;
 }
 
 export type FaultSwitchProviderName = 'aws-ssm' | 'gcp-secret' | 'gcp-config';
@@ -226,14 +229,30 @@ function defaultFetch(
   return fetch(url, { headers: init?.headers });
 }
 
-/** Same tokens as the AWS SSM reader: true/1/on and false/0/off. */
-function parseSwitch(value: string): boolean {
+/**
+ * true/1/on/all enable every fault and false/0/off/none disable them (the AWS
+ * tokens plus all/none). Anything else is a comma-separated list of fault ids,
+ * such as `payment-delay`, so one fault can be rehearsed alone.
+ */
+export function parseSwitch(value: string): FaultSwitchValue {
   const normalized = value.trim().toLowerCase();
-  if (normalized === 'true' || normalized === '1' || normalized === 'on') {
+  if (normalized === 'true' || normalized === '1' || normalized === 'on' || normalized === 'all') {
     return true;
   }
-  if (normalized === 'false' || normalized === '0' || normalized === 'off') {
+  if (
+    normalized === 'false' ||
+    normalized === '0' ||
+    normalized === 'off' ||
+    normalized === 'none'
+  ) {
     return false;
+  }
+  const ids = normalized
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id) => id !== '');
+  if (ids.length > 0 && ids.every((id) => /^[a-z0-9][a-z0-9-]*$/.test(id))) {
+    return ids;
   }
   throw new Error('fault switch value is unreadable');
 }

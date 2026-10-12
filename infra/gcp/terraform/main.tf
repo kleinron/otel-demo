@@ -65,7 +65,21 @@ locals {
     FAULT_SWITCH_PROVIDER   = "gcp"
     GCP_FAULT_SWITCH_SOURCE = "secret"
     GCP_FAULT_SWITCH_SECRET = google_secret_manager_secret.faults.secret_id
+    # Fixed rehearsal faults. The secret selects them: off | on/all | a fault id
+    # (comma-separated for several). No window start, so they run at any time of
+    # day while selected; the window ends at the hard stop as a backstop.
+    OTEL_DEMO_FAULTS             = jsonencode(local.rehearsal_faults)
+    OTEL_DEMO_FAULT_WINDOW_END   = var.hard_stop_utc
+    FAULT_SWITCH_READ_TIMEOUT_MS = "3000"
   }
+  rehearsal_faults = [
+    # Every DB attempt (retries included) fails after 400ms, so inventory 5xxs.
+    { id = "inventory-db-timeout", type = "timeout", service = "inventory", operation = "database", delayMs = 400 },
+    # Longer than shop's 2s payment timeout; the charge still lands late.
+    { id = "payment-delay", type = "delay", service = "payment", operation = "charge", delayMs = 5000 },
+    # Slow checkout without failing it.
+    { id = "checkout-delay", type = "delay", service = "shop", operation = "checkout", delayMs = 3000 },
+  ]
   shop_env = {
     INVENTORY_URL = "http://localhost:3002"
     PAYMENT_URL   = "http://localhost:3003"

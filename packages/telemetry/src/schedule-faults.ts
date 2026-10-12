@@ -9,10 +9,15 @@ import {
   DEFAULT_FAULT_LAST_KNOWN_MS,
   DEFAULT_FAULT_POLL_MS,
   FaultInjectedError,
+  readTimeoutFromEnv,
+  switchOn,
+  withReadTimeout,
+  DEFAULT_FAULT_READ_TIMEOUT_MS,
   startFaultControl as startSingleWindow,
   type FaultControlLog,
   type FaultController,
   type FaultSwitchReader,
+  type FaultSwitchValue,
 } from './fault-control.js';
 import type { FaultSpec } from './faults.js';
 import {
@@ -34,6 +39,7 @@ export interface WindowedFaultControllerOptions {
   pollIntervalMs?: number;
   lastKnownTtlMs?: number;
   failureLimit?: number;
+  readTimeoutMs?: number;
 }
 
 const noopLog: FaultControlLog = {
@@ -51,7 +57,9 @@ export function createWindowedFaultController(
   options: WindowedFaultControllerOptions,
 ): FaultController {
   const log = tracedLog(options.log ?? noopLog);
-  let lastValue: boolean | undefined;
+  let lastValue: FaultSwitchValue | undefined;
+  let selection: FaultSwitchValue = false;
+  const readTimeoutMs = options.readTimeoutMs ?? DEFAULT_FAULT_READ_TIMEOUT_MS;
   const wallClock = options.wallClock ?? (() => Date.now());
   const random = options.random ?? Math.random;
   const lastKnownTtlMs = options.lastKnownTtlMs ?? DEFAULT_FAULT_LAST_KNOWN_MS;
@@ -104,11 +112,12 @@ export function createWindowedFaultController(
   async function pollOnce(): Promise<void> {
     const now = wallClock();
     try {
-      const value = await readSwitch(options.reader);
+      const value = await withReadTimeout(readSwitch(options.reader), readTimeoutMs);
       noteSwitchValue(lastValue, value, log);
       lastValue = value;
+      selection = value;
       consecutiveFailures = 0;
-      if (value) {
+      if (switchOn(value)) {
         enabled = true;
         enabledAtMs = now;
         operatorOffLogged = false;
@@ -128,6 +137,8 @@ export function createWindowedFaultController(
       const age = enabledAtMs === undefined ? Number.POSITIVE_INFINITY : now - enabledAtMs;
       if (enabled && consecutiveFailures >= failureLimit && age >= lastKnownTtlMs) {
         enabled = false;
+        selection = false;
+        lastValue = undefined;
         if (!failSafeLogged) {
           log.warn('faults off by fail-safe', {
             at: new Date(now).toISOString(),
@@ -172,7 +183,8 @@ export function createWindowedFaultController(
           now >= entry.startMs &&
           now < entry.endMs &&
           entry.service === target.service &&
-          entry.operation === target.operation,
+          entry.operation === target.operation &&
+          (selection === true || (Array.isArray(selection) && selection.includes(entry.id))),
       );
       if (!fault) {
         return;
@@ -254,6 +266,7 @@ async function openWindowed(
     reader,
     log,
     pollIntervalMs: pollRaw,
+    readTimeoutMs: readTimeoutFromEnv(env),
   });
   await controller.pollOnce();
   controller.start();
@@ -286,6 +299,37 @@ export function databaseFaultHook(
       if (!active) {
         span.end();
       }
+    }
+  };
+}
+
+/** Error thrown by {@link databaseAttemptHook}; `ETIMEDOUT` makes the pool retry it. */
+export class InjectedDatabaseTimeout extends Error {
+  readonly code = 'ETIMEDOUT';
+  constructor(cause: unknown) {
+    super('injected database timeout (connection timeout)', { cause });
+    this.name = 'InjectedDatabaseTimeout';
+  }
+}
+
+/**
+ * Pass as the pg pool's `beforeAttempt`. Runs on every attempt, so a
+ * `database` timeout fault fails each retry, not just the first try, and the
+ * query span shows every `db.retry` event and `db.retry.exhausted`.
+ */
+export function databaseAttemptHook(faults: FaultController, service: string): () => Promise<void> {
+  return async () => {
+    const span = trace.getSpan(context.active());
+    if (!span) {
+      return;
+    }
+    try {
+      await faults.apply({ service, operation: 'database' }, span);
+    } catch (error) {
+      if (error instanceof FaultInjectedError && error.faultType === 'timeout') {
+        throw new InjectedDatabaseTimeout(error);
+      }
+      throw error;
     }
   };
 }
