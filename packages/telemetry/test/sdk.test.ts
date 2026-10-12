@@ -28,7 +28,7 @@ describe('SDK wiring', () => {
     expect(sdkConfig.textMapPropagator).toBeInstanceOf(CompositePropagator);
     expect(sdkConfig.serviceName).toBe('delivery');
     expect(sdkConfig.sampler).toBeInstanceOf(AlwaysOnSampler);
-    expect(sdkConfig.spanProcessors).toHaveLength(2);
+    expect(sdkConfig.spanProcessors).toHaveLength(3);
     expect(sdkConfig.metricReaders).toHaveLength(1);
     expect(sdkConfig.views).toHaveLength(1);
     expect(new NodeSDK(sdkConfig)).toBeInstanceOf(NodeSDK);

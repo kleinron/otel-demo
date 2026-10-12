@@ -1,3 +1,30 @@
+import { SpanKind, SpanStatusCode, trace, type Span } from '@opentelemetry/api';
+
+const tracer = () => trace.getTracer('@otel-demo/db');
+
+/** Parameterized SQL with any inline literals masked; parameter values are never recorded. */
+export function sanitizeSql(text: string): string {
+  return text
+    .replace(/'(?:[^']|'')*'/g, "'?'")
+    .replace(/\b\d+(?:\.\d+)?\b/g, (m, offset: number, all: string) =>
+      all[offset - 1] === '$' ? m : '?',
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 1000);
+}
+
+function sqlVerb(text: string): string {
+  return (/^\s*(\w+)/.exec(text)?.[1] ?? 'QUERY').toUpperCase();
+}
+
+function failSpan(span: Span, error: unknown): void {
+  const err = error instanceof Error ? error : new Error(String(error));
+  span.recordException(err);
+  span.setAttribute('error.type', err.name || 'Error');
+  span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+}
+
 export type SqlOutcome = 'success' | 'error' | 'timeout';
 
 export interface SqlCall {
@@ -14,6 +41,8 @@ export interface SqlOptions {
    * injected timeout can last longer than the driver's own limit.
    */
   beforeQuery?: (operation: string) => Promise<void>;
+  /** `db.namespace` on query spans. */
+  dbName?: string;
 }
 
 export interface SqlRows<T> {
@@ -88,33 +117,79 @@ export function createSql(executor: QueryExecutor, options: SqlOptions = {}): Sq
         params: readonly unknown[] = [],
         operation = 'query',
       ): Promise<SqlRows<T>> {
-        const started = performance.now();
-        try {
-          if (options.beforeQuery) {
-            await options.beforeQuery(operation);
+        const verb = sqlVerb(text);
+        return tracer().startActiveSpan(
+          `${verb} ${operation}`,
+          {
+            kind: SpanKind.CLIENT,
+            attributes: {
+              'db.system.name': 'postgresql',
+              'db.operation.name': verb,
+              'db.query.summary': operation,
+              'db.query.text': sanitizeSql(text),
+              ...(options.dbName ? { 'db.namespace': options.dbName } : {}),
+            },
+          },
+          async (span) => {
+            try {
+              return await runQuery();
+            } catch (error) {
+              failSpan(span, error);
+              throw error;
+            } finally {
+              span.end();
+            }
+          },
+        );
+
+        async function runQuery(): Promise<SqlRows<T>> {
+          const started = performance.now();
+          try {
+            if (options.beforeQuery) {
+              await options.beforeQuery(operation);
+            }
+            const result = await withTimeout(inner.query<T>(text, params), timeoutMs, operation);
+            options.onCall?.({
+              operation,
+              outcome: 'success',
+              durationMs: performance.now() - started,
+            });
+            return result;
+          } catch (error) {
+            const timedOut = error instanceof DbTimeoutError || isTimeoutMessage(error);
+            options.onCall?.({
+              operation,
+              outcome: timedOut ? 'timeout' : 'error',
+              durationMs: performance.now() - started,
+            });
+            if (timedOut && !(error instanceof DbTimeoutError)) {
+              throw new DbTimeoutError(operation);
+            }
+            throw error;
           }
-          const result = await withTimeout(inner.query<T>(text, params), timeoutMs, operation);
-          options.onCall?.({
-            operation,
-            outcome: 'success',
-            durationMs: performance.now() - started,
-          });
-          return result;
-        } catch (error) {
-          const timedOut = error instanceof DbTimeoutError || isTimeoutMessage(error);
-          options.onCall?.({
-            operation,
-            outcome: timedOut ? 'timeout' : 'error',
-            durationMs: performance.now() - started,
-          });
-          if (timedOut && !(error instanceof DbTimeoutError)) {
-            throw new DbTimeoutError(operation);
-          }
-          throw error;
         }
       },
       transaction(fn) {
-        return inner.transaction(async (tx) => fn(wrap(tx)));
+        return tracer().startActiveSpan(
+          'db transaction',
+          {
+            kind: SpanKind.INTERNAL,
+            attributes: {
+              'db.system.name': 'postgresql',
+              ...(options.dbName ? { 'db.namespace': options.dbName } : {}),
+            },
+          },
+          async (span) => {
+            try {
+              return await inner.transaction(async (tx) => fn(wrap(tx)));
+            } catch (error) {
+              failSpan(span, error);
+              throw error;
+            } finally {
+              span.end();
+            }
+          },
+        );
       },
       close() {
         return inner.close();

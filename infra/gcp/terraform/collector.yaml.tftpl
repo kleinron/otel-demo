@@ -23,3 +23,13 @@ service:
   telemetry:
     logs:
       level: ${collector_log_level}
+    # Own metrics (sent / failed / dropped spans) on localhost only. The shop
+    # reads them once a minute and logs a `collector self-metrics` line.
+    metrics:
+      level: normal
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: localhost
+                port: 8888

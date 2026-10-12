@@ -1,7 +1,11 @@
 import { metrics, type Meter } from '@opentelemetry/api';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { defaultResource, resourceFromAttributes } from '@opentelemetry/resources';
+import {
+  defaultResource,
+  resourceFromAttributes,
+  type DetectedResourceAttributes,
+} from '@opentelemetry/resources';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { NodeSDK, type NodeSDKConfiguration } from '@opentelemetry/sdk-node';
 import { AlwaysOnSampler, BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
@@ -10,6 +14,7 @@ import { createTraceIdGenerator } from './ids.js';
 import { httpServerDurationView } from './metrics.js';
 import { createTracePropagator } from './propagate.js';
 import { CartSpanProcessor } from './cart.js';
+import { OrderSpanProcessor } from './order-span.js';
 
 export interface TelemetryHandle {
   config: TelemetryConfig;
@@ -36,7 +41,9 @@ export interface StartTelemetryOptions extends TelemetryOptions {
 export function buildNodeSdkConfiguration(config: TelemetryConfig): Partial<NodeSDKConfiguration> {
   return {
     serviceName: config.serviceName,
-    resource: defaultResource().merge(resourceFromAttributes(config.resourceAttributes)),
+    resource: defaultResource()
+      .merge(resourceFromAttributes(config.resourceAttributes))
+      .merge(resourceFromAttributes(cloudRunAttributes(process.env))),
     autoDetectResources: false,
     instrumentations: [],
     textMapPropagator: createTracePropagator(),
@@ -44,6 +51,7 @@ export function buildNodeSdkConfiguration(config: TelemetryConfig): Partial<Node
     sampler: new AlwaysOnSampler(),
     spanProcessors: [
       new CartSpanProcessor(),
+      new OrderSpanProcessor(config.serviceName),
       new BatchSpanProcessor(
         new OTLPTraceExporter({
           url: config.tracesUrl,
@@ -92,4 +100,36 @@ export function startTelemetry(options: StartTelemetryOptions): TelemetryHandle 
 
 export function getServiceMeter(name: string, version?: string): Meter {
   return metrics.getMeter(name, version);
+}
+
+const INSTANCE_ID_URL = 'http://metadata.google.internal/computeMetadata/v1/instance/id';
+
+/**
+ * Cloud Run resource attributes: service, revision, and instance id (from the
+ * metadata server, resolved asynchronously; exporters wait for it). Empty off
+ * Cloud Run (no `K_REVISION`).
+ */
+export function cloudRunAttributes(
+  env: Record<string, string | undefined>,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): DetectedResourceAttributes {
+  const revision = env.K_REVISION?.trim();
+  if (!revision) {
+    return {};
+  }
+  const instance = fetchImpl(INSTANCE_ID_URL, {
+    headers: { 'Metadata-Flavor': 'Google' },
+    signal: AbortSignal.timeout(2_000),
+  })
+    .then(async (response) => (response.ok ? (await response.text()).trim() : undefined))
+    .catch(() => undefined);
+  return {
+    'cloud.provider': 'gcp',
+    'cloud.platform': 'gcp_cloud_run',
+    'faas.name': env.K_SERVICE?.trim() || undefined,
+    'faas.version': revision,
+    'faas.instance': instance,
+    'cloud_run.revision': revision,
+    'cloud_run.instance_id': instance,
+  };
 }

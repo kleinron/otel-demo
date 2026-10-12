@@ -1,3 +1,5 @@
+import { trace } from '@opentelemetry/api';
+import { inChildSpan, inRootSpan, recordFailure } from './trace-helpers.js';
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { SpanStatusCode, type Span } from '@opentelemetry/api';
@@ -243,10 +245,16 @@ export function createFaultController(options: FaultControllerOptions): FaultCon
   let active = false;
   let timer: ReturnType<typeof setInterval> | undefined;
 
-  async function pollOnce(): Promise<void> {
+  function pollOnce(): Promise<void> {
+    return inRootSpan('fault-control', 'fault-switch poll', () => pollOnceInSpan());
+  }
+
+  async function pollOnceInSpan(): Promise<void> {
     const now = wallClock();
     try {
-      const value = await options.reader.read();
+      const value = await inChildSpan('fault-control', 'fault-switch read', () =>
+        options.reader.read(),
+      );
       consecutiveFailures = 0;
       if (value) {
         enabled = true;
@@ -262,7 +270,11 @@ export function createFaultController(options: FaultControllerOptions): FaultCon
           operatorOffLogged = true;
         }
       }
-    } catch {
+    } catch (error) {
+      const span = trace.getActiveSpan();
+      if (span) {
+        recordFailure(span, error, 'fault switch read failed');
+      }
       consecutiveFailures += 1;
       const age = enabledAtMs === undefined ? Number.POSITIVE_INFINITY : now - enabledAtMs;
       if (enabled && consecutiveFailures >= failureLimit && age >= lastKnownTtlMs) {

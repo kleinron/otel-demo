@@ -1,5 +1,20 @@
 import { randomUUID } from 'node:crypto';
-import { customerId } from '@otel-demo/telemetry';
+import {
+  context,
+  isSpanContextValid,
+  ROOT_CONTEXT,
+  SpanKind,
+  SpanStatusCode,
+  trace,
+  type Span,
+} from '@opentelemetry/api';
+import {
+  customerId,
+  GCP_SPAN_ID_FIELD,
+  GCP_TRACE_FIELD,
+  injectTraceHeaders,
+  withCartBaggage,
+} from '@otel-demo/telemetry';
 
 /**
  * One load tick for the GCP deploy: `carts` simulated shopping-cart journeys,
@@ -28,6 +43,8 @@ export interface CartTickOptions {
   random?: () => number;
   newId?: () => string;
   log?: (event: Record<string, unknown>) => void;
+  /** Project for `logging.googleapis.com/trace` on loadgen lines. */
+  projectId?: string;
 }
 
 export type CartOutcome = 'completed' | 'abandoned';
@@ -87,51 +104,101 @@ export async function runCart(options: CartTickOptions): Promise<CartResult> {
   const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
   let checkoutAttempts = 0;
 
-  async function call(
+  // Each shopper step is its own root span (trace) carrying cart.id in baggage,
+  // so a cart's requests line up by cart.id. With no SDK registered the spans
+  // are no-ops and only the baggage header is sent, as before.
+  const cartContext = withCartBaggage(cartId, ROOT_CONTEXT);
+  const tracer = trace.getTracer('loadgen');
+
+  function step<T>(name: string, fn: (span: Span) => Promise<T>): Promise<T> {
+    return tracer.startActiveSpan(
+      `cart ${name}`,
+      { kind: SpanKind.CLIENT, root: true, attributes: { 'cart.id': cartId, 'cart.step': name } },
+      cartContext,
+      async (span) => {
+        try {
+          return await fn(span);
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  function traceFields(): Record<string, string> {
+    const spanContext = trace.getSpan(context.active())?.spanContext();
+    if (!spanContext || !isSpanContextValid(spanContext)) {
+      return {};
+    }
+    return {
+      ...(options.projectId
+        ? { [GCP_TRACE_FIELD]: `projects/${options.projectId}/traces/${spanContext.traceId}` }
+        : {}),
+      [GCP_SPAN_ID_FIELD]: spanContext.spanId,
+    };
+  }
+
+  function call(
     operation: string,
     method: 'GET' | 'POST',
     path: string,
     body?: unknown,
     headers: Record<string, string> = {},
   ): Promise<{ status: number; body: unknown }> {
-    const started = performance.now();
-    let status = 0;
-    try {
-      const response = await doFetch(`${base}${path}`, {
-        method,
-        headers: {
-          accept: 'application/json',
-          baggage: `cart.id=${cartId}`,
-          ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-          ...(options.authHeaders ? await options.authHeaders() : {}),
-          ...headers,
-        },
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(30_000),
-      });
-      status = response.status;
-      return { status, body: parse(await response.text()) };
-    } catch {
-      return { status: 0, body: undefined };
-    } finally {
-      log({
-        severity: status >= 500 || status === 0 ? 'WARNING' : 'INFO',
-        message: 'request',
-        cart: { id: cartId },
-        operation,
-        status,
-        latencyMs: Math.round(performance.now() - started),
-      });
-    }
+    return step(operation, async (span) => {
+      const started = performance.now();
+      let status = 0;
+      span.setAttribute('http.request.method', method);
+      try {
+        const response = await doFetch(`${base}${path}`, {
+          method,
+          headers: {
+            accept: 'application/json',
+            ...injectTraceHeaders({ baggage: `cart.id=${cartId}` }),
+            ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+            ...(options.authHeaders ? await options.authHeaders() : {}),
+            ...headers,
+          },
+          body: body !== undefined ? JSON.stringify(body) : undefined,
+          signal: AbortSignal.timeout(30_000),
+        });
+        status = response.status;
+        span.setAttribute('http.response.status_code', status);
+        if (status >= 500) {
+          span.setStatus({ code: SpanStatusCode.ERROR, message: `HTTP ${status}` });
+        }
+        return { status, body: parse(await response.text()) };
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        span.recordException(err);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+        return { status: 0, body: undefined };
+      } finally {
+        log({
+          severity: status >= 500 || status === 0 ? 'WARNING' : 'INFO',
+          message: 'request',
+          ...traceFields(),
+          cart: { id: cartId },
+          operation,
+          status,
+          latencyMs: Math.round(performance.now() - started),
+        });
+      }
+    });
   }
 
-  function close(outcome: CartOutcome): CartResult {
-    log({
-      severity: 'INFO',
-      message: 'cart closed',
-      cart: { id: cartId },
-      outcome,
-      checkoutAttempts,
+  async function close(outcome: CartOutcome): Promise<CartResult> {
+    await step('close', async (span) => {
+      span.setAttribute('cart.outcome', outcome);
+      span.setAttribute('cart.checkout_attempts', checkoutAttempts);
+      log({
+        severity: 'INFO',
+        message: 'cart closed',
+        ...traceFields(),
+        cart: { id: cartId },
+        outcome,
+        checkoutAttempts,
+      });
     });
     return { cartId, outcome, checkoutAttempts };
   }

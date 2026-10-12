@@ -177,3 +177,10 @@ export {
   startServiceFaultControl,
   type WindowedFaultControllerOptions,
 } from './schedule-faults.js';
+export { inChildSpan, inRootSpan, inRootSpanSync, recordFailure } from './trace-helpers.js';
+export {
+  COLLECTOR_COUNTERS,
+  parseCollectorStats,
+  startCollectorStats,
+  type CollectorStats,
+} from './collector-stats.js';

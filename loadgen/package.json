@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@otel-demo/telemetry": "*",
-    "undici": "^7.16.0"
+    "undici": "^7.16.0",
+    "@opentelemetry/api": "^1.9.1"
   }
 }

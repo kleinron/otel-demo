@@ -32,6 +32,8 @@ export interface TracedRequest {
   target: string;
   operation: string;
   url: string;
+  /** Route template on the target, e.g. `/charges/:orderId/capture`. Names the span. */
+  route?: string;
   method: 'GET' | 'POST' | 'DELETE';
   timeoutMs: number;
   body?: unknown;
@@ -50,13 +52,21 @@ export interface TracedResponse {
  */
 export async function tracedRequest(input: TracedRequest): Promise<TracedResponse> {
   const tracer = trace.getTracer(input.service);
-  const span = tracer.startSpan(`HTTP ${input.method} ${input.target}`, {
+  const route = input.route ?? routeOf(input.url);
+  const idempotencyKey = input.headers?.['idempotency-key'];
+  const span = tracer.startSpan(`${input.method} ${route}`, {
     kind: SpanKind.CLIENT,
     attributes: {
       'otel-demo.service': input.service,
       'peer.service': input.target,
+      'server.address': input.target,
       'http.request.method': input.method,
+      'url.template': route,
       'outbound.operation': input.operation,
+      ...(idempotencyKey ? { orderId: idempotencyKey } : {}),
+      ...(idempotencyKey && input.target === 'payment'
+        ? { 'payment.idempotency_key': idempotencyKey }
+        : {}),
     },
   });
   try {
@@ -82,7 +92,8 @@ export async function tracedRequest(input: TracedRequest): Promise<TracedRespons
         span.setAttribute('http.response.status_code', response.status);
         const outcome = response.status >= 500 ? 'error' : 'success';
         if (response.status >= 500) {
-          span.setStatus({ code: SpanStatusCode.ERROR });
+          span.setAttribute('error.type', String(response.status));
+          span.setStatus({ code: SpanStatusCode.ERROR, message: `HTTP ${response.status}` });
         }
         input.metrics?.record({
           target: input.target,
@@ -99,12 +110,19 @@ export async function tracedRequest(input: TracedRequest): Promise<TracedRespons
           outcome: timedOut ? 'timeout' : 'error',
           service: input.service,
         });
+        const failure = timedOut
+          ? new OutboundTimeoutError(input.target)
+          : error instanceof Error
+            ? error
+            : new Error(String(error));
+        span.recordException(failure);
+        span.setAttribute('error.type', failure.name || 'Error');
         span.setStatus({
           code: SpanStatusCode.ERROR,
-          message: timedOut ? 'timeout' : 'error',
+          message: timedOut ? 'timeout' : failure.message,
         });
         if (timedOut) {
-          throw new OutboundTimeoutError(input.target);
+          throw failure;
         }
         throw error;
       } finally {
@@ -134,4 +152,12 @@ function isAbort(error: unknown): boolean {
   }
   const name = (error as { name?: unknown }).name;
   return name === 'AbortError' || name === 'TimeoutError';
+}
+
+function routeOf(url: string): string {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return url;
+  }
 }
