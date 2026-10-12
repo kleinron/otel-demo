@@ -18,6 +18,15 @@ locals {
     tonumber(local.hard_stop_parts.day),
     tonumber(local.hard_stop_parts.month),
   )
+  # SQL stop runs five minutes after the app hard stop so Cloud Run can finish
+  # draining before activationPolicy NEVER. Live jobs use "5 0 14 10 *".
+  sql_hard_stop_cron = format(
+    "%d %d %d %d *",
+    tonumber(local.hard_stop_parts.minute) + 5,
+    tonumber(local.hard_stop_parts.hour),
+    tonumber(local.hard_stop_parts.day),
+    tonumber(local.hard_stop_parts.month),
+  )
   # Cloud Run's TCP startup probe cannot reach a localhost listener, so the
   # health extension must bind every interface. Octets are joined so the
   # address is not a literal in the repo.
