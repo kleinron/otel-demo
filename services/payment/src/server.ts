@@ -11,6 +11,7 @@ import type { Sql } from '@otel-demo/db';
 import {
   inRequest,
   jsonBody,
+  orderIdFrom,
   registerAccessLog,
   registerSpanLifecycle,
   routeParam,
@@ -42,6 +43,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const latencyMs = options.latencyMs ?? 0;
   registerAccessLog(app, options.logger);
   registerSpanLifecycle(app, SERVICE_NAME);
+  // Every payment span carries the idempotency key (the order id) it acts on.
+  app.addHook('preHandler', async (request) => {
+    const key = orderIdFrom(request);
+    if (key) {
+      spanOf(request)?.setAttribute('payment.idempotency_key', key);
+    }
+  });
   app.addHook('onResponse', async (request, reply) => {
     options.metrics?.record({
       operation: routeOperation(request.routeOptions.url),

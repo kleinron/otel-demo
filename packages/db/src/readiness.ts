@@ -1,3 +1,4 @@
+import { context, ROOT_CONTEXT, SpanStatusCode, trace } from '@opentelemetry/api';
 import type { Sql } from './sql.js';
 
 export interface Readiness {
@@ -24,12 +25,25 @@ export function migrateInBackground(
   const maxDelayMs = options.maxDelayMs ?? 5_000;
   const migrated = (async () => {
     for (let attempt = 1; !stopped; attempt += 1) {
+      const span = trace
+        .getTracer('@otel-demo/db')
+        .startSpan(
+          'db migrate',
+          { root: true, attributes: { 'db.migrate.attempt': attempt } },
+          ROOT_CONTEXT,
+        );
+      const ctx = trace.setSpan(ROOT_CONTEXT, span);
       try {
-        await migrate(sql);
+        await context.with(ctx, () => migrate(sql));
+        span.end();
         done = true;
         return;
       } catch (error) {
-        options.onError?.(error, attempt);
+        const err = error instanceof Error ? error : new Error(String(error));
+        span.recordException(err);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+        context.with(ctx, () => options.onError?.(error, attempt));
+        span.end();
         const delay = Math.min(maxDelayMs, 250 * 2 ** Math.min(attempt - 1, 5));
         await new Promise((resolve) => setTimeout(resolve, delay));
       }

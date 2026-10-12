@@ -1,3 +1,11 @@
+import {
+  ROOT_CONTEXT,
+  SpanKind,
+  SpanStatusCode,
+  context,
+  trace,
+  type Span,
+} from '@opentelemetry/api';
 import { Pool, type PoolConfig } from 'pg';
 import { createSql, type QueryExecutor, type Sql, type SqlOptions, type SqlRows } from './sql.js';
 
@@ -38,7 +46,7 @@ export interface PgSql extends Sql {
 
 export function createPgSql(connectionString: string, options: PgSqlOptions = {}): PgSql {
   const executor = createPgExecutor(connectionString, options.timeoutMs ?? 5_000, options);
-  const sql = createSql(executor, options);
+  const sql = createSql(executor, { dbName: databaseName(connectionString), ...options });
   return { ...sql, ping: executor.ping };
 }
 
@@ -122,13 +130,63 @@ function createPgExecutor(
   const pool: PoolLike = options.createPool ? options.createPool(config) : new Pool(config);
   pool.on('error', (error) => {
     // pg already removes the idle client that emitted this; report it so the
-    // outage is visible instead of silently swallowed.
-    options.onConnectionError?.(error);
+    // outage is visible instead of silently swallowed. Idle-client errors have
+    // no request context, so they get their own root span.
+    const span = tracer().startSpan('db pool idle-client error', { root: true }, ROOT_CONTEXT);
+    failSpan(span, error);
+    try {
+      context.with(trace.setSpan(ROOT_CONTEXT, span), () => options.onConnectionError?.(error));
+    } finally {
+      span.end();
+    }
   });
+
+  /** `pool.connect()` in its own span: a checkout, which may open a new connection. */
+  function connect(): Promise<PoolClientLike> {
+    return tracer().startActiveSpan(
+      'db pool connect',
+      { kind: SpanKind.CLIENT, attributes: { 'db.system.name': 'postgresql' } },
+      async (span) => {
+        try {
+          return await pool.connect();
+        } catch (error) {
+          failSpan(span, error);
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  /** BEGIN / COMMIT / ROLLBACK each get a span like any other statement. */
+  function control(client: PoolClientLike, statement: 'BEGIN' | 'COMMIT' | 'ROLLBACK') {
+    return tracer().startActiveSpan(
+      statement,
+      {
+        kind: SpanKind.CLIENT,
+        attributes: {
+          'db.system.name': 'postgresql',
+          'db.operation.name': statement,
+          'db.query.text': statement,
+        },
+      },
+      async (span) => {
+        try {
+          return await client.query(statement);
+        } catch (error) {
+          failSpan(span, error);
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
 
   /** Check out a client, run fn, and destroy the client if its connection broke. */
   async function withClient<T>(fn: (client: PoolClientLike) => Promise<T>): Promise<T> {
-    const client = await pool.connect();
+    const client = await connect();
     try {
       const value = await fn(client);
       client.release();
@@ -149,10 +207,18 @@ function createPgExecutor(
           throw error;
         }
         options.onConnectionError?.(error);
+        const span = trace.getActiveSpan();
         if (attempt >= attempts) {
+          span?.addEvent('db.retry.exhausted', { 'db.retry.attempt': attempt });
           throw error;
         }
         const delay = baseDelayMs * 2 ** (attempt - 1);
+        span?.addEvent('db.retry', {
+          'db.retry.attempt': attempt,
+          'db.retry.next_attempt': attempt + 1,
+          'error.type': error instanceof Error ? error.name : 'Error',
+          'exception.message': error instanceof Error ? error.message : String(error),
+        });
         await sleep(delay / 2 + Math.random() * (delay / 2));
       }
     }
@@ -189,23 +255,23 @@ function createPgExecutor(
       // Only the connect + BEGIN step is retried; once user work starts, an
       // error propagates so a half-done transaction is never replayed blindly.
       return withRetry(async () => {
-        const client = await pool.connect();
+        const client = await connect();
         try {
-          await client.query('BEGIN');
+          await control(client, 'BEGIN');
         } catch (error) {
           client.release(asError(error));
           throw error;
         }
         try {
           const value = await fn(fromClient(client));
-          await client.query('COMMIT');
+          await control(client, 'COMMIT');
           client.release();
           return value;
         } catch (error) {
           let broken = isTransientConnectionError(error);
           if (!broken) {
             try {
-              await client.query('ROLLBACK');
+              await control(client, 'ROLLBACK');
             } catch {
               broken = true;
             }
@@ -215,14 +281,31 @@ function createPgExecutor(
         }
       });
     },
-    async ping() {
-      try {
-        await withClient((client) => client.query('SELECT 1'));
-        return true;
-      } catch (error) {
-        options.onConnectionError?.(error);
-        return false;
-      }
+    ping() {
+      return tracer().startActiveSpan(
+        'SELECT ping',
+        {
+          kind: SpanKind.CLIENT,
+          attributes: {
+            'db.system.name': 'postgresql',
+            'db.operation.name': 'SELECT',
+            'db.query.summary': 'ping',
+            'db.query.text': 'SELECT 1',
+          },
+        },
+        async (span) => {
+          try {
+            await withClient((client) => client.query('SELECT 1'));
+            return true;
+          } catch (error) {
+            failSpan(span, error);
+            options.onConnectionError?.(error);
+            return false;
+          } finally {
+            span.end();
+          }
+        },
+      );
     },
     close: () => pool.end(),
   };
@@ -247,4 +330,23 @@ function asError(error: unknown): Error {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const tracer = () => trace.getTracer('@otel-demo/db');
+
+function failSpan(span: Span, error: unknown): void {
+  const err = asError(error);
+  span.recordException(err);
+  span.setAttribute('error.type', err.name || 'Error');
+  span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+}
+
+/** Database name from the URL path, never the credentials. */
+function databaseName(connectionString: string): string | undefined {
+  try {
+    const name = new URL(connectionString).pathname.replace(/^\//, '');
+    return name === '' ? undefined : decodeURIComponent(name);
+  } catch {
+    return undefined;
+  }
 }

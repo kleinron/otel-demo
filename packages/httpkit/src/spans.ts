@@ -1,5 +1,6 @@
 import {
   context,
+  ROOT_CONTEXT,
   SpanKind,
   SpanStatusCode,
   trace,
@@ -24,7 +25,8 @@ export function registerSpanLifecycle(app: FastifyInstance, service: string): vo
 
   app.addHook('onRequest', async (request) => {
     const carrier = headerCarrier(request);
-    const parent = extractTraceContext(carrier);
+    // Never inherit ambient context (e.g. the startup span) for a new request.
+    const parent = extractTraceContext(carrier, ROOT_CONTEXT);
     const route = routeOperation(request.routeOptions.url);
     const span = tracer.startSpan(
       `${request.method} ${route}`,
@@ -42,6 +44,16 @@ export function registerSpanLifecycle(app: FastifyInstance, service: string): vo
     contexts.set(request, trace.setSpan(parent, span));
   });
 
+  app.addHook('onError', async (request, _reply, error) => {
+    const span = spans.get(request);
+    if (!span) {
+      return;
+    }
+    span.recordException(error);
+    span.setAttribute('error.type', error.name || 'Error');
+    span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+  });
+
   app.addHook('onResponse', async (request, reply) => {
     const span = spans.get(request);
     if (!span) {
@@ -52,7 +64,8 @@ export function registerSpanLifecycle(app: FastifyInstance, service: string): vo
     span.setAttribute('http.route', route);
     span.setAttribute('http.response.status_code', reply.statusCode);
     if (reply.statusCode >= 500) {
-      span.setStatus({ code: SpanStatusCode.ERROR });
+      span.setAttribute('error.type', String(reply.statusCode));
+      span.setStatus({ code: SpanStatusCode.ERROR, message: `HTTP ${reply.statusCode}` });
     }
     span.end();
     spans.delete(request);

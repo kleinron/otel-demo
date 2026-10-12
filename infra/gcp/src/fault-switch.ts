@@ -1,3 +1,4 @@
+import { SpanKind, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   createFaultSwitch as createAwsFaultSwitch,
   type SsmParameterClient,
@@ -112,7 +113,36 @@ export function createSecretManagerClient(
   const fetchImpl = options.fetch ?? defaultFetch;
   const token = options.token ?? (() => readMetadataAccessToken(fetchImpl));
   return {
-    async access(resource: string) {
+    access(resource: string) {
+      // Own client span so the Secret Manager read and its log lines are traced.
+      return trace.getTracer('fault-switch').startActiveSpan(
+        'secretmanager AccessSecretVersion',
+        {
+          kind: SpanKind.CLIENT,
+          attributes: {
+            'rpc.system': 'http',
+            'rpc.service': 'secretmanager',
+            'gcp.secret': resource,
+          },
+        },
+        async (span) => {
+          try {
+            return await accessOnce(resource);
+          } catch (error) {
+            const err = error instanceof Error ? error : new Error(String(error));
+            span.recordException(err);
+            span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+            throw error;
+          } finally {
+            span.end();
+          }
+        },
+      );
+    },
+  };
+
+  async function accessOnce(resource: string): Promise<string | undefined> {
+    {
       const bearer = await token();
       const response = await fetchImpl(
         `https://secretmanager.googleapis.com/v1/${resource}:access`,
@@ -125,8 +155,8 @@ export function createSecretManagerClient(
       }
       const body = await response.json();
       return decodeSecretPayload(body);
-    },
-  };
+    }
+  }
 }
 
 function createConfigFaultSwitch(env: Record<string, string | undefined>): FaultSwitchReader {

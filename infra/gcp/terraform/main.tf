@@ -56,6 +56,8 @@ locals {
     GCP_PROJECT_ID              = var.project_id
     OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4318"
     DEPLOYMENT_ENVIRONMENT      = "gcp"
+    # service.version on every span: the image tag.
+    OTEL_SERVICE_VERSION = element(reverse(split(":", var.service_image)), 0)
     # Faults stay off unless the Secret Manager switch is set to on.
     FAULT_SWITCH_SOURCE     = "module"
     FAULT_SWITCH_MODULE     = "@otel-demo/infra-gcp/fault-switch"
@@ -67,6 +69,8 @@ locals {
     INVENTORY_URL = "http://localhost:3002"
     PAYMENT_URL   = "http://localhost:3003"
     DELIVERY_URL  = "http://localhost:3004"
+    # Collector self-metrics (localhost only), logged once a minute.
+    COLLECTOR_METRICS_URL = "http://localhost:8888/metrics"
   }
 }
 

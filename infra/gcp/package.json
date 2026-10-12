@@ -15,6 +15,7 @@
     }
   },
   "dependencies": {
-    "@otel-demo/infra-aws": "*"
+    "@otel-demo/infra-aws": "*",
+    "@opentelemetry/api": "^1.9.1"
   }
 }

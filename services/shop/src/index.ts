@@ -7,6 +7,8 @@ import {
   databaseFaultHook,
   getServiceMeter,
   startServiceFaultControl,
+  inRootSpan,
+  startCollectorStats,
   startTelemetry,
   type FaultController,
 } from '@otel-demo/telemetry';
@@ -27,6 +29,18 @@ export async function startShop(
 ): Promise<ShopHandle> {
   const telemetry = startTelemetry({ serviceName: SERVICE_NAME, env });
   const logger = createLogger({ service: SERVICE_NAME, level: env.LOG_LEVEL });
+  // Startup runs in its own root span so every startup log line is traced.
+  return inRootSpan(SERVICE_NAME, 'startup', () => startInSpan(env, deps, telemetry, logger));
+}
+
+async function startInSpan(
+  env: Record<string, string | undefined>,
+  deps: {
+    connect?: (connectionString: string, options?: PgSqlOptions) => Promise<Sql>;
+  },
+  telemetry: ReturnType<typeof startTelemetry>,
+  logger: ReturnType<typeof createLogger>,
+): Promise<ShopHandle> {
   const meter = getServiceMeter(SERVICE_NAME);
   const metrics = createHttpMetrics(meter, { service: SERVICE_NAME });
   const outbound = createOutboundMetrics(meter, { service: SERVICE_NAME });
@@ -77,6 +91,10 @@ export async function startShop(
     const host = listenHost(env);
     await app.listen({ port, host });
     logger.info({ port }, 'listening');
+    const collectorMetricsUrl = env.COLLECTOR_METRICS_URL?.trim();
+    const stopCollectorStats = collectorMetricsUrl
+      ? startCollectorStats(logger, collectorMetricsUrl)
+      : () => {};
 
     let closed = false;
     const close = async (): Promise<void> => {
@@ -84,6 +102,7 @@ export async function startShop(
         return;
       }
       closed = true;
+      stopCollectorStats();
       faults.stop();
       readiness.stop();
       await app.close();
