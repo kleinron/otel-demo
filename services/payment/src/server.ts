@@ -6,6 +6,7 @@ import {
   withSideEffectLog,
   type FaultController,
   type HttpMetrics,
+  currentCartId,
 } from '@otel-demo/telemetry';
 import type { Sql } from '@otel-demo/db';
 import {
@@ -121,6 +122,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
             return created;
           },
         );
+        noteUnseenCharge(options.logger, request, charge);
         return reply.code(200).send(charge);
       } catch (error) {
         const fault = faultReply(error, reply);
@@ -236,4 +238,38 @@ function pause(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+/**
+ * One line when an authorized charge finishes after the caller (shop) already
+ * gave up, e.g. on its 2s timeout. Nobody will capture it, so it is the
+ * "abandoned cart with an authorized, uncaptured payment" signal, keyed by
+ * cart.id for Log Explorer.
+ */
+export const UNSEEN_CHARGE_MESSAGE = 'charge authorized after caller gave up';
+
+function noteUnseenCharge(
+  logger: Logger | undefined,
+  request: FastifyRequest,
+  charge: { orderId: string; status: string; amountCents: number },
+): void {
+  if (!logger || charge.status !== 'authorized') {
+    return;
+  }
+  // The request stream itself auto-destroys once read; the socket tells us the caller left.
+  const socket = request.raw.socket;
+  if (socket && !socket.destroyed && socket.writable) {
+    return;
+  }
+  const cartId = currentCartId();
+  logger.warn(
+    {
+      ...(cartId ? { cart: { id: cartId } } : {}),
+      orderId: charge.orderId,
+      amountCents: charge.amountCents,
+      payment_status: 'authorized',
+      outcome: 'abandoned',
+    },
+    UNSEEN_CHARGE_MESSAGE,
+  );
 }
