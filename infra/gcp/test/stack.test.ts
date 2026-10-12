@@ -99,6 +99,7 @@ describe('GCP terraform spike', () => {
       'roles/cloudsql.client',
       'roles/cloudtrace.agent',
       'roles/iam.serviceAccountTokenCreator',
+      'roles/monitoring.metricWriter',
       'roles/pubsub.publisher',
       'roles/run.developer',
       'roles/run.invoker',
