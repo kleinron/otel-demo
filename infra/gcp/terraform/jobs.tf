@@ -71,8 +71,8 @@ resource "google_cloud_run_v2_job" "loadgen" {
   template {
     task_count = 1
     template {
-      # Existing account. Its roles/run.developer already covers invoking the shop.
-      service_account = google_service_account.hard_stop.email
+      # Own identity: invokes the shop and writes its step spans to Cloud Trace.
+      service_account = google_service_account.loadgen.email
       max_retries     = 0
       timeout         = "90s"
 
@@ -107,6 +107,23 @@ resource "google_cloud_run_v2_job" "loadgen" {
           name  = "LOAD_STOP_AT"
           value = var.hard_stop_utc
         }
+        # One root span per shopper step, exported to the Cloud Telemetry API.
+        env {
+          name  = "OTEL_SERVICE_VERSION"
+          value = element(reverse(split(":", local.jobs_image)), 0)
+        }
+        env {
+          name  = "LOADGEN_TRACING"
+          value = "on"
+        }
+        env {
+          name  = "LOADGEN_OTLP_TARGET"
+          value = "gcp-telemetry-api"
+        }
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.project_id
+        }
       }
     }
   }
@@ -135,4 +152,26 @@ resource "google_cloud_scheduler_job" "loadgen" {
       scope                 = "https://www.googleapis.com/auth/cloud-platform"
     }
   }
+}
+
+# Loadgen job identity. Writes traces (roles/cloudtrace.agent includes
+# telemetry.traces.write for the OTLP endpoint) and invokes the shop, which
+# is not public (no allUsers invoker), so it needs run.invoker on that service.
+resource "google_service_account" "loadgen" {
+  account_id   = "otel-demo-loadgen"
+  display_name = "otel-demo loadgen job"
+}
+
+resource "google_project_iam_member" "loadgen_trace_agent" {
+  project = var.project_id
+  role    = "roles/cloudtrace.agent"
+  member  = "serviceAccount:${google_service_account.loadgen.email}"
+}
+
+resource "google_cloud_run_v2_service_iam_member" "loadgen_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.shop.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.loadgen.email}"
 }

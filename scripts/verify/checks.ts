@@ -285,7 +285,12 @@ export function checkResource(traces: Trace[], revision?: string): CheckResult {
   for (const trace of traces) {
     for (const span of appSpans(trace)) {
       spans += 1;
-      for (const key of ['service.name', 'service.version', 'faas.version', 'faas.instance']) {
+      // The loadgen is a Cloud Run job, not a revision: no faas.version / faas.instance.
+      const keys =
+        label(span, 'service.name') === 'loadgen'
+          ? ['service.name', 'service.version']
+          : ['service.name', 'service.version', 'faas.version', 'faas.instance'];
+      for (const key of keys) {
         if (!label(span, key)) {
           failures.push(`${where(trace, span)}: ${key} missing`);
         }
