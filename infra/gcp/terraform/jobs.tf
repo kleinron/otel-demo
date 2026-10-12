@@ -17,12 +17,13 @@ resource "google_cloud_run_v2_job" "seed" {
       volumes {
         name = "cloudsql"
         cloud_sql_instance {
-          instances = [for app in local.apps : google_sql_database_instance.app[app].connection_name]
+          # Same order as live (shop, delivery, inventory, payment) so plan stays clean.
+          instances = [for app in ["shop", "delivery", "inventory", "payment"] : google_sql_database_instance.app[app].connection_name]
         }
       }
 
       containers {
-        image   = var.service_image
+        image   = local.jobs_image
         command = ["npx", "tsx", "scripts/seed.ts"]
 
         resources {
@@ -76,7 +77,7 @@ resource "google_cloud_run_v2_job" "loadgen" {
       timeout         = "90s"
 
       containers {
-        image   = var.service_image
+        image   = local.jobs_image
         command = ["node", "loadgen/dist/cart-tick-main.js"]
 
         resources {
@@ -120,9 +121,7 @@ resource "google_cloud_scheduler_job" "loadgen" {
   region           = local.scheduler_region
   attempt_deadline = "30s"
 
-  retry_config {
-    retry_count = 0
-  }
+  # No retry_config block: live has none, and the default (0 retries) is the same.
 
   http_target {
     http_method = "POST"

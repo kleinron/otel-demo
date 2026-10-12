@@ -131,3 +131,9 @@ variable "load_cron" {
   default     = "* * 12-13 10 *"
   description = "UTC cron for the load tick. The default only matches 2026-10-12 and 2026-10-13, so it ends at the hard stop."
 }
+
+variable "jobs_image" {
+  description = "Image for the seed and loadgen jobs. Empty means service_image."
+  type        = string
+  default     = ""
+}
