@@ -103,15 +103,16 @@ resource "google_project_iam_member" "cloudsql_client" {
   member  = "serviceAccount:${google_service_account.shop.email}"
 }
 
-# Hard stop for the databases: at hard_stop_utc, set activationPolicy NEVER on
-# each instance through the Cloud SQL Admin API. Scheduler acts as an existing
-# account that already has cloudsql.instances.update. No role is granted here.
+# Hard stop for the databases: five minutes after hard_stop_utc, set
+# activationPolicy NEVER on each instance through the Cloud SQL Admin API.
+# Scheduler acts as an existing account that already has cloudsql.instances.update.
+# No role is granted here. Description text kept for live parity.
 resource "google_cloud_scheduler_job" "sql_hard_stop" {
   for_each = toset(local.apps)
 
   name        = "otel-demo-sql-hard-stop-${each.key}"
   description = "Stop Cloud SQL instance otel-demo-${each.key} (activationPolicy NEVER) at hard_stop_utc."
-  schedule    = local.hard_stop_cron
+  schedule    = local.sql_hard_stop_cron
   time_zone   = "Etc/UTC"
   region      = local.scheduler_region
 
