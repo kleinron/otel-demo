@@ -1,0 +1,1479 @@
+{
+  "uid": "otel-demo",
+  "title": "otel-demo",
+  "tags": [
+    "otel-demo",
+    "gcp"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "project",
+        "type": "constant",
+        "hide": 2,
+        "query": "otel-demo-gcp",
+        "current": {
+          "text": "otel-demo-gcp",
+          "value": "otel-demo-gcp"
+        }
+      },
+      {
+        "name": "trace_id",
+        "type": "textbox",
+        "label": "trace id",
+        "current": {
+          "text": "",
+          "value": ""
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "shop",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "shop Request rate",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.requests",
+              "AND",
+              "metric.label.service",
+              "=",
+              "shop"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "shop Error rate (5xx)",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.errors",
+              "AND",
+              "metric.label.service",
+              "=",
+              "shop"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "shop p50",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.request.duration",
+              "AND",
+              "metric.label.service",
+              "=",
+              "shop"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_PERCENTILE_50",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "shop p95",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.request.duration",
+              "AND",
+              "metric.label.service",
+              "=",
+              "shop"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_PERCENTILE_95",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "shop p99",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.request.duration",
+              "AND",
+              "metric.label.service",
+              "=",
+              "shop"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_PERCENTILE_99",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "shop Outbound calls",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/outbound.calls",
+              "AND",
+              "metric.label.service",
+              "=",
+              "shop"
+            ],
+            "groupBys": [
+              "metric.label.target",
+              "metric.label.outcome"
+            ],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "inventory",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "inventory Request rate",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.requests",
+              "AND",
+              "metric.label.service",
+              "=",
+              "inventory"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "inventory Error rate (5xx)",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 4,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.errors",
+              "AND",
+              "metric.label.service",
+              "=",
+              "inventory"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "inventory p50",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 8,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.request.duration",
+              "AND",
+              "metric.label.service",
+              "=",
+              "inventory"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_PERCENTILE_50",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "inventory p95",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 12,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.request.duration",
+              "AND",
+              "metric.label.service",
+              "=",
+              "inventory"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_PERCENTILE_95",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "inventory p99",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 16,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.request.duration",
+              "AND",
+              "metric.label.service",
+              "=",
+              "inventory"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_PERCENTILE_99",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "inventory Outbound calls",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 20,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/outbound.calls",
+              "AND",
+              "metric.label.service",
+              "=",
+              "inventory"
+            ],
+            "groupBys": [
+              "metric.label.target",
+              "metric.label.outcome"
+            ],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "row",
+      "title": "payment",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "payment Request rate",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 0,
+        "y": 15
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.requests",
+              "AND",
+              "metric.label.service",
+              "=",
+              "payment"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "payment Error rate (5xx)",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 4,
+        "y": 15
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.errors",
+              "AND",
+              "metric.label.service",
+              "=",
+              "payment"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "payment p50",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 8,
+        "y": 15
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.request.duration",
+              "AND",
+              "metric.label.service",
+              "=",
+              "payment"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_PERCENTILE_50",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "payment p95",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 12,
+        "y": 15
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.request.duration",
+              "AND",
+              "metric.label.service",
+              "=",
+              "payment"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_PERCENTILE_95",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "payment p99",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 16,
+        "y": 15
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.request.duration",
+              "AND",
+              "metric.label.service",
+              "=",
+              "payment"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_PERCENTILE_99",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "payment Outbound calls",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 20,
+        "y": 15
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/outbound.calls",
+              "AND",
+              "metric.label.service",
+              "=",
+              "payment"
+            ],
+            "groupBys": [
+              "metric.label.target",
+              "metric.label.outcome"
+            ],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "row",
+      "title": "delivery",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "delivery Request rate",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 0,
+        "y": 22
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.requests",
+              "AND",
+              "metric.label.service",
+              "=",
+              "delivery"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "delivery Error rate (5xx)",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 4,
+        "y": 22
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.errors",
+              "AND",
+              "metric.label.service",
+              "=",
+              "delivery"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "delivery p50",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 8,
+        "y": 22
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.request.duration",
+              "AND",
+              "metric.label.service",
+              "=",
+              "delivery"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_PERCENTILE_50",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "delivery p95",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 12,
+        "y": 22
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.request.duration",
+              "AND",
+              "metric.label.service",
+              "=",
+              "delivery"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_PERCENTILE_95",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "type": "timeseries",
+      "title": "delivery p99",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 16,
+        "y": 22
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.request.duration",
+              "AND",
+              "metric.label.service",
+              "=",
+              "delivery"
+            ],
+            "groupBys": [
+              "metric.label.operation"
+            ],
+            "crossSeriesReducer": "REDUCE_PERCENTILE_99",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "delivery Outbound calls",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 20,
+        "y": 22
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/outbound.calls",
+              "AND",
+              "metric.label.service",
+              "=",
+              "delivery"
+            ],
+            "groupBys": [
+              "metric.label.target",
+              "metric.label.outcome"
+            ],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "type": "row",
+      "title": "checkout",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      }
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "checkout requests by outcome",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 29
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.requests",
+              "AND",
+              "metric.label.service",
+              "=",
+              "shop",
+              "AND",
+              "metric.label.operation",
+              "=",
+              "/carts/:cartId/checkout"
+            ],
+            "groupBys": [
+              "metric.label.outcome"
+            ],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "checkout requests by status",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcm"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 29
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcm"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "$project",
+            "filters": [
+              "metric.type",
+              "=",
+              "workload.googleapis.com/http.server.requests",
+              "AND",
+              "metric.label.service",
+              "=",
+              "shop",
+              "AND",
+              "metric.label.operation",
+              "=",
+              "/carts/:cartId/checkout"
+            ],
+            "groupBys": [
+              "metric.label.http_response_status_code"
+            ],
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "60s",
+            "view": "FULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "logs",
+      "title": "all lines for a trace id",
+      "description": "Port of the CloudWatch saved query. Every app log line carries the Cloud Trace id in the LogEntry trace field; open it in Google Cloud Trace via Explore.",
+      "datasource": {
+        "type": "googlecloud-logging-datasource",
+        "uid": "gcl"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "googlecloud-logging-datasource",
+            "uid": "gcl"
+          },
+          "projectId": "$project",
+          "queryText": "resource.type=\"cloud_run_revision\" resource.labels.service_name=\"otel-demo-shop\" trace=\"projects/$project/traces/$trace_id\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Ascending"
+      }
+    },
+    {
+      "id": 33,
+      "type": "logs",
+      "title": "errors by service last 15m",
+      "datasource": {
+        "type": "googlecloud-logging-datasource",
+        "uid": "gcl"
+      },
+      "timeFrom": "15m",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "googlecloud-logging-datasource",
+            "uid": "gcl"
+          },
+          "projectId": "$project",
+          "queryText": "resource.type=\"cloud_run_revision\" resource.labels.service_name=\"otel-demo-shop\" severity>=ERROR"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "enableLogDetails": true,
+        "dedupStrategy": "none"
+      }
+    }
+  ]
+}

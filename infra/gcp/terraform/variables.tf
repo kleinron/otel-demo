@@ -137,3 +137,26 @@ variable "jobs_image" {
   type        = string
   default     = ""
 }
+
+variable "grafana_enabled" {
+  type        = bool
+  default     = false
+  description = "Create the Grafana VM and its SA, IAM, secret, firewall and stop job."
+}
+
+variable "grafana_image" {
+  type        = string
+  default     = "grafana/grafana:11.6.0"
+  description = "Grafana container image run on the VM."
+}
+
+variable "grafana_zone" {
+  type    = string
+  default = "me-west1-a"
+}
+
+variable "grafana_allowed_cidrs" {
+  type        = list(string)
+  default     = []
+  description = "Source ranges allowed to reach Grafana on tcp:3000."
+}
