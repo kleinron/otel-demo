@@ -59,9 +59,10 @@ write_files:
       log "data disk mounted"
       md=http://metadata.google.internal/computeMetadata/v1
       tok=$(curl -sf -H 'Metadata-Flavor: Google' "$md/instance/service-accounts/default/token" | sed -E 's/.*"access_token":"([^"]+)".*/\1/')
+      # The API pretty-prints JSON ("data": "..."); strip whitespace before parsing.
       pw=$(curl -sf -H "Authorization: Bearer $tok" \
         "https://secretmanager.googleapis.com/v1/projects/${project_id}/secrets/${secret_id}/versions/latest:access" \
-        | sed -E 's/.*"data":"([^"]+)".*/\1/' | base64 -d)
+        | tr -d ' \n' | sed -E 's/.*"data":"([^"]+)".*/\1/' | base64 -d)
       [ -n "$pw" ] || { log "admin password empty"; exit 1; }
       log "admin password read"
       mkdir -p /run/grafana-otel && umask 077
