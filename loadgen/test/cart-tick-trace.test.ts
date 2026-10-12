@@ -58,4 +58,33 @@ describe('loadgen step spans', () => {
     expect(sent.every((h) => h.traceparent && h.baggage === `cart.id=${result.cartId}`)).toBe(true);
     expect(logs.every((l) => typeof l['logging.googleapis.com/spanId'] === 'string')).toBe(true);
   });
+
+  it('makes a checkout retry its own trace, linked to the failed attempt', async () => {
+    exporter.reset();
+    let checkouts = 0;
+    const fetch = (async (url: string) => {
+      if (url.endsWith('/checkout')) {
+        checkouts += 1;
+        return new Response('{}', { status: checkouts === 1 ? 503 : 201 });
+      }
+      const status = url.endsWith('/carts') ? 201 : 200;
+      return new Response(JSON.stringify({ cartId: 'c1' }), { status });
+    }) as unknown as typeof globalThis.fetch;
+    await runCart({
+      shopUrl: 'http://shop',
+      carts: 1,
+      spacingMs: 0,
+      skus: ['a'],
+      customerCount: 10,
+      fetch,
+      random: () => 0,
+      log: () => undefined,
+    });
+    const spans = exporter.getFinishedSpans();
+    const [first, retry] = spans.filter((s) => s.name === 'cart checkout');
+    expect(retry?.spanContext().traceId).not.toBe(first?.spanContext().traceId);
+    expect(retry?.links[0]?.context.spanId).toBe(first?.spanContext().spanId);
+    expect(retry?.attributes['retry.previous_trace_id']).toBe(first?.spanContext().traceId);
+    expect(new Set(spans.map((s) => s.spanContext().traceId)).size).toBe(spans.length);
+  });
 });

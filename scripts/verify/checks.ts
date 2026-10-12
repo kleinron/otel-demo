@@ -495,7 +495,40 @@ export function checkRequestRoots(traces: Trace[]): CheckResult {
   let loadgenRooted = 0;
   let freshRoots = 0;
   const byId = (trace: Trace) => new Map(trace.spans.map((s) => [s.spanId, s]));
+  let retries = 0;
+  const allById = new Map(traces.map((t) => [t.traceId, t]));
   for (const trace of traces) {
+    const stepSpans = trace.spans.filter(isLoadgenStep);
+    if (stepSpans.length > 1) {
+      failures.push(`${trace.traceId}: ${stepSpans.length} shopper steps in one trace (want 1)`);
+    }
+    for (const span of stepSpans) {
+      if (
+        span.name !== 'cart checkout' ||
+        Number(label(span, 'cart.checkout_attempt') ?? '1') <= 1
+      ) {
+        continue;
+      }
+      // Retry: own trace, linked to the failed attempt. The v1 read API does not
+      // return links, so the link target is mirrored in retry.previous_* attributes.
+      retries += 1;
+      const previousTrace = label(span, 'retry.previous_trace_id');
+      const previousSpan = label(span, 'retry.previous_span_id');
+      if (!previousTrace || !previousSpan) {
+        failures.push(`${where(trace, span)}: checkout retry without a link to the failed attempt`);
+        continue;
+      }
+      if (previousTrace === trace.traceId) {
+        failures.push(`${where(trace, span)}: checkout retry shares the failed attempt's trace`);
+      }
+      const prior = allById.get(previousTrace);
+      if (
+        prior &&
+        !prior.spans.some((s) => s.name === 'cart checkout' && hexSpanId(s.spanId) === previousSpan)
+      ) {
+        failures.push(`${where(trace, span)}: linked failed attempt not found in ${previousTrace}`);
+      }
+    }
     for (const span of trace.spans) {
       if (isLoadgenStep(span)) {
         steps.add(label(span, 'cart.step') ?? span.name.slice(5));
@@ -533,8 +566,8 @@ export function checkRequestRoots(traces: Trace[]): CheckResult {
     }
   }
   return result(
-    'request traces rooted at a loadgen step (or a fresh shop root), with cart.id',
+    'one shopper step per trace, rooted at it (or a fresh shop root), cart.id, retry links',
     failures,
-    `${loadgenRooted} loadgen-rooted, ${freshRoots} fresh roots; steps: ${[...steps].sort().join(', ')}`,
+    `${loadgenRooted} loadgen-rooted, ${freshRoots} fresh roots, ${retries} checkout retries; steps: ${[...steps].sort().join(', ')}`,
   );
 }
