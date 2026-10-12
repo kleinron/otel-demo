@@ -159,3 +159,25 @@ describe('GCP terraform spike', () => {
     expect(docs).toContain('constraints/iam.managed.disableServiceAccountKeyCreation');
   });
 });
+
+describe('grafana (draft)', () => {
+  const tf = readFileSync(new URL('../terraform/grafana.tf', import.meta.url), 'utf8');
+  it('grants the Grafana SA read-only telemetry roles only', () => {
+    const roles = [...tf.matchAll(/"(roles\/[^"]+)"/g)].map((m) => m[1]).sort();
+    expect(roles).toEqual([
+      'roles/cloudtrace.user',
+      'roles/logging.viewer',
+      'roles/monitoring.viewer',
+      'roles/secretmanager.secretAccessor',
+    ]);
+  });
+  it('e2-small VM, anonymous off, only :3000 open, stopped at the hard stop', () => {
+    const init = readFileSync(new URL('../grafana/cloud-init.yaml.tftpl', import.meta.url), 'utf8');
+    expect(init).toContain('GF_AUTH_ANONYMOUS_ENABLED=false');
+    expect(tf).toContain('machine_type = "e2-small"');
+    expect(tf).toContain('ports    = ["3000"]');
+    expect(tf).toContain('schedule    = local.hard_stop_cron');
+    expect(tf).toContain('/stop"');
+    expect(tf).not.toMatch(/allUsers|credentials|key_file|google_service_account_key/);
+  });
+});

@@ -1,0 +1,62 @@
+#cloud-config
+# Grafana on Container-Optimized OS. Provisioning files come from the repo
+# (infra/gcp/grafana) through instance metadata; data lives on the attached
+# persistent disk. The admin password is read from Secret Manager at boot with
+# the VM's own SA token (metadata server); no key file.
+write_files:
+  - path: /etc/grafana-otel/provisioning/datasources/datasources.yml
+    permissions: "0644"
+    encoding: b64
+    content: ${datasources_b64}
+  - path: /etc/grafana-otel/provisioning/dashboards/dashboards.yml
+    permissions: "0644"
+    encoding: b64
+    content: ${dashboards_provider_b64}
+  - path: /etc/grafana-otel/dashboards/otel-demo/otel-demo.json
+    permissions: "0644"
+    encoding: b64
+    content: ${dashboard_b64}
+  - path: /etc/systemd/system/grafana.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Grafana (otel-demo)
+      Wants=network-online.target
+      After=network-online.target docker.service
+      [Service]
+      ExecStartPre=/bin/bash /etc/grafana-otel/prestart.sh
+      ExecStart=/usr/bin/docker run --rm --name grafana -p 3000:3000 \
+        --env-file /run/grafana-otel/env \
+        -e GF_AUTH_ANONYMOUS_ENABLED=false \
+        -e GF_USERS_ALLOW_SIGN_UP=false \
+        -e GF_ANALYTICS_REPORTING_ENABLED=false \
+        -e GF_SECURITY_ADMIN_USER=admin \
+        -e GF_INSTALL_PLUGINS=googlecloud-trace-datasource,googlecloud-logging-datasource \
+        -v /mnt/disks/grafana:/var/lib/grafana \
+        -v /etc/grafana-otel/provisioning/datasources:/etc/grafana/provisioning/datasources:ro \
+        -v /etc/grafana-otel/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro \
+        -v /etc/grafana-otel/dashboards:/etc/grafana/dashboards:ro \
+        ${grafana_image}
+      ExecStop=/usr/bin/docker stop grafana
+      Restart=always
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/grafana-otel/prestart.sh
+    permissions: "0700"
+    content: |
+      set -euo pipefail
+      dev=/dev/disk/by-id/google-grafana-data
+      blkid "$dev" >/dev/null || mkfs.ext4 -F "$dev"
+      mkdir -p /mnt/disks/grafana
+      mountpoint -q /mnt/disks/grafana || mount -o discard,defaults "$dev" /mnt/disks/grafana
+      chown 472:0 /mnt/disks/grafana
+      md=http://metadata.google.internal/computeMetadata/v1
+      tok=$(curl -sf -H 'Metadata-Flavor: Google' "$md/instance/service-accounts/default/token" | sed -E 's/.*"access_token":"([^"]+)".*/\1/')
+      pw=$(curl -sf -H "Authorization: Bearer $tok" \
+        "https://secretmanager.googleapis.com/v1/projects/${project_id}/secrets/${secret_id}/versions/latest:access" \
+        | sed -E 's/.*"data":"([^"]+)".*/\1/' | base64 -d)
+      mkdir -p /run/grafana-otel && umask 077
+      printf 'GF_SECURITY_ADMIN_PASSWORD=%s\n' "$pw" > /run/grafana-otel/env
+runcmd:
+  - systemctl daemon-reload
+  - systemctl enable --now grafana.service
