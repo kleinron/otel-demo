@@ -266,6 +266,10 @@ describe('schedule fault windows', () => {
 function capture(messages: string[], fields: Record<string, unknown>[] = []): FaultControlLog {
   return {
     info(message, extra) {
+      // Switch read/changed lines are covered in switch-trace.test.ts.
+      if (message.startsWith('fault switch ')) {
+        return;
+      }
       messages.push(message);
       fields.push(extra ?? {});
     },

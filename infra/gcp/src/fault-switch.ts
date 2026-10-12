@@ -114,6 +114,10 @@ export function createSecretManagerClient(
   const token = options.token ?? (() => readMetadataAccessToken(fetchImpl));
   return {
     access(resource: string) {
+      // Background polls (no active span) are not traced; the startup read is.
+      if (!trace.getActiveSpan()) {
+        return accessOnce(resource);
+      }
       // Own client span so the Secret Manager read and its log lines are traced.
       return trace.getTracer('fault-switch').startActiveSpan(
         'secretmanager AccessSecretVersion',

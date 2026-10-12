@@ -365,27 +365,51 @@ export function checkPaymentKey(traces: Trace[]): CheckResult {
   return result('payment spans carry the idempotency key', failures, `${spans} payment spans`);
 }
 
-export function checkBackground(traces: Trace[]): CheckResult {
+/**
+ * The fault switch is traced only at startup: each service's `startup` trace
+ * holds a `fault-switch read` with its Secret Manager read. Background polls
+ * export nothing (a `fault-switch change` root appears only when the value flips).
+ */
+export function checkFaultSwitch(traces: Trace[], startups: Trace[]): CheckResult {
   const failures: string[] = [];
-  let polls = 0;
   for (const trace of traces) {
-    const poll = trace.spans.find((s) => s.name === 'fault-switch poll');
-    if (!poll) {
+    for (const span of trace.spans) {
+      if (span.name === 'fault-switch poll') {
+        failures.push(`${where(trace, span)}: background poll span exported`);
+      }
+      if (
+        (span.name === 'fault-switch read' || span.name === 'secretmanager AccessSecretVersion') &&
+        !trace.spans.some((s) => s.name === 'startup')
+      ) {
+        failures.push(`${where(trace, span)}: switch read traced outside startup`);
+      }
+    }
+  }
+  const services = new Set<string>();
+  for (const trace of startups) {
+    const startup = trace.spans.find((s) => s.name === 'startup');
+    if (!startup) {
       continue;
     }
-    polls += 1;
-    const names = descendants(trace, poll).map((s) => s.name);
+    const names = descendants(trace, startup).map((s) => s.name);
     if (
       !names.includes('fault-switch read') ||
       !names.includes('secretmanager AccessSecretVersion')
     ) {
-      failures.push(`${where(trace, poll)}: missing read / Secret Manager span`);
+      failures.push(`${where(trace, startup)}: startup without switch / Secret Manager read`);
+    }
+    services.add(label(startup, 'service.name') ?? '?');
+  }
+  for (const service of ['shop', 'inventory', 'payment', 'delivery']) {
+    if (!services.has(service)) {
+      failures.push(`no startup trace for ${service}`);
     }
   }
-  if (polls === 0) {
-    failures.push('no fault-switch poll traces seen');
-  }
-  return result('fault-switch read and Secret Manager read traced', failures, `${polls} polls`);
+  return result(
+    'fault switch: startup read traced, polls untraced',
+    failures,
+    `startup traces: ${[...services].sort().join(', ') || 'none'}`,
+  );
 }
 
 export function checkLogs(entries: LogEntry[], knownSpans?: Set<string>): CheckResult {

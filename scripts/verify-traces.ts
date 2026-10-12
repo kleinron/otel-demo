@@ -18,7 +18,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   cartJourney,
-  checkBackground,
+  checkFaultSwitch,
   checkCartId,
   checkCollector,
   checkErrors,
@@ -103,6 +103,20 @@ do {
   pageToken = page.nextPageToken;
 } while (pageToken && requests < count && traces.length < 3000);
 
+// Startup traces of the serving revision (around its creation time).
+const startupPage = await api<{ traces?: Trace[] }>(
+  `https://cloudtrace.googleapis.com/v1/projects/${project}/traces?${new URLSearchParams({
+    view: 'COMPLETE',
+    pageSize: '50',
+    filter: 'span:startup',
+    startTime: new Date(Date.parse(rev.createTime) - 60_000).toISOString(),
+    endTime: new Date(Date.parse(rev.createTime) + 15 * 60_000).toISOString(),
+  })}`,
+);
+const startups = (startupPage.traces ?? []).filter((t) =>
+  t.spans.some((s) => s.name === 'startup' && label(s, 'faas.version') === revision),
+);
+
 const requestTraces = traces.filter((t) => traceType(t) === 'request');
 const knownSpans = new Set(traces.flatMap((t) => t.spans.map((s) => hexSpanId(s.spanId))));
 
@@ -150,7 +164,7 @@ const results: CheckResult[] = [
   checkSql(traces),
   checkErrors(traces),
   checkPaymentKey(traces),
-  checkBackground(traces),
+  checkFaultSwitch(traces, startups),
   checkLogs(logs.entries ?? [], knownSpans),
   checkCollector(collector.entries ?? []),
 ];

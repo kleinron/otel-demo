@@ -1,6 +1,6 @@
-import { inChildSpan, inRootSpan, recordFailure } from './trace-helpers.js';
+import { noteSwitchValue, readSwitch, tracedLog } from './switch-trace.js';
 import { readFileSync } from 'node:fs';
-import { context, trace } from '@opentelemetry/api';
+import { context, ROOT_CONTEXT, trace } from '@opentelemetry/api';
 import {
   applyMatchedFault,
   clampPollInterval,
@@ -50,7 +50,8 @@ type WindowPhase = 'pending' | 'open' | 'closed';
 export function createWindowedFaultController(
   options: WindowedFaultControllerOptions,
 ): FaultController {
-  const log = options.log ?? noopLog;
+  const log = tracedLog(options.log ?? noopLog);
+  let lastValue: boolean | undefined;
   const wallClock = options.wallClock ?? (() => Date.now());
   const random = options.random ?? Math.random;
   const lastKnownTtlMs = options.lastKnownTtlMs ?? DEFAULT_FAULT_LAST_KNOWN_MS;
@@ -100,16 +101,12 @@ export function createWindowedFaultController(
     }
   }
 
-  function pollOnce(): Promise<void> {
-    return inRootSpan('fault-control', 'fault-switch poll', () => pollOnceInSpan());
-  }
-
-  async function pollOnceInSpan(): Promise<void> {
+  async function pollOnce(): Promise<void> {
     const now = wallClock();
     try {
-      const value = await inChildSpan('fault-control', 'fault-switch read', () =>
-        options.reader.read(),
-      );
+      const value = await readSwitch(options.reader);
+      noteSwitchValue(lastValue, value, log);
+      lastValue = value;
       consecutiveFailures = 0;
       if (value) {
         enabled = true;
@@ -125,11 +122,8 @@ export function createWindowedFaultController(
           operatorOffLogged = true;
         }
       }
-    } catch (error) {
-      const span = trace.getActiveSpan();
-      if (span) {
-        recordFailure(span, error, 'fault switch read failed');
-      }
+    } catch {
+      // The startup read records the failure on its own span; polls stay untraced.
       consecutiveFailures += 1;
       const age = enabledAtMs === undefined ? Number.POSITIVE_INFINITY : now - enabledAtMs;
       if (enabled && consecutiveFailures >= failureLimit && age >= lastKnownTtlMs) {
@@ -154,7 +148,8 @@ export function createWindowedFaultController(
         return;
       }
       timer = setInterval(() => {
-        void pollOnce();
+        // Detach from whatever context start() ran in (e.g. the startup span).
+        void context.with(ROOT_CONTEXT, () => pollOnce());
       }, pollIntervalMs);
       timer.unref?.();
     },
