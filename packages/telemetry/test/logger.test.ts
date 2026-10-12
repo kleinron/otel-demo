@@ -3,7 +3,13 @@ import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-ho
 import { Writable } from 'node:stream';
 import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { createLogger, withOrderId } from '../src/index.js';
+import {
+  GCP_SPAN_ID_FIELD,
+  GCP_TRACE_FIELD,
+  GCP_TRACE_SAMPLED_FIELD,
+  createLogger,
+  withOrderId,
+} from '../src/index.js';
 
 beforeAll(() => {
   const manager = new AsyncLocalStorageContextManager();
@@ -14,7 +20,14 @@ beforeAll(() => {
 const TRACE_ID = '4bf92f3577b34da6a3ce929d0e0e4736';
 const SPAN_ID = '00f067aa0ba902b7';
 
-function captureLogger(service = 'payment') {
+function captureLogger(
+  service = 'payment',
+  options: {
+    format?: 'default' | 'gcp';
+    cloudProvider?: 'aws' | 'gcp';
+    gcpProjectId?: string;
+  } = {},
+) {
   const lines: Record<string, unknown>[] = [];
   const stream = new Writable({
     write(chunk, _encoding, callback) {
@@ -26,7 +39,24 @@ function captureLogger(service = 'payment') {
       callback();
     },
   });
-  return { logger: createLogger({ service, destination: stream }), lines };
+  return {
+    logger: createLogger({
+      service,
+      destination: stream,
+      format: options.format,
+      cloudProvider: options.cloudProvider,
+      gcpProjectId: options.gcpProjectId,
+    }),
+    lines,
+  };
+}
+
+function restoreEnv(name: 'LOG_FORMAT' | 'GCP_PROJECT_ID', previous: string | undefined): void {
+  if (previous === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = previous;
+  }
 }
 
 describe('structured logs', () => {
@@ -132,6 +162,129 @@ describe('structured logs', () => {
       'payment-charge succeeded',
     );
     expect(quiet.lines).toHaveLength(1);
+  });
+
+  it('writes Cloud Logging field names when LOG_FORMAT=gcp', () => {
+    const provider = new BasicTracerProvider({
+      idGenerator: {
+        generateTraceId: () => TRACE_ID,
+        generateSpanId: () => SPAN_ID,
+      },
+    });
+    const span = provider.getTracer('test').startSpan('charge');
+    const { logger, lines } = captureLogger('payment', {
+      format: 'gcp',
+      gcpProjectId: 'otel-demo-spike',
+    });
+
+    context.with(trace.setSpan(ROOT_CONTEXT, span), () => {
+      withOrderId('ord_1001', () => {
+        logger.info({ route: 'charge' }, 'charge requested');
+        logger.warn('charge slow');
+        logger.error('charge failed');
+      });
+    });
+    span.end();
+
+    expect(lines[0]).toMatchObject({
+      severity: 'INFO',
+      service: 'payment',
+      [GCP_TRACE_FIELD]: `projects/otel-demo-spike/traces/${TRACE_ID}`,
+      [GCP_SPAN_ID_FIELD]: SPAN_ID,
+      [GCP_TRACE_SAMPLED_FIELD]: true,
+      orderId: 'ord_1001',
+      route: 'charge',
+      message: 'charge requested',
+    });
+    expect(typeof lines[0]?.severity).toBe('string');
+    expect(lines[0]).not.toHaveProperty('level');
+    expect(lines[0]).not.toHaveProperty('msg');
+    expect(lines[0]).not.toHaveProperty('trace_id');
+    expect(lines[0]).not.toHaveProperty('span_id');
+    expect(lines[0]).not.toHaveProperty('xray_trace_id');
+    expect(lines[1]?.severity).toBe('WARNING');
+    expect(lines[1]?.message).toBe('charge slow');
+    expect(lines[2]?.severity).toBe('ERROR');
+    expect(lines[2]?.message).toBe('charge failed');
+  });
+
+  it('omits the Cloud Logging trace field when GCP_PROJECT_ID is missing', () => {
+    const provider = new BasicTracerProvider({
+      idGenerator: {
+        generateTraceId: () => TRACE_ID,
+        generateSpanId: () => SPAN_ID,
+      },
+    });
+    const span = provider.getTracer('test').startSpan('health');
+    const { logger, lines } = captureLogger('shop', { format: 'gcp', gcpProjectId: '' });
+
+    context.with(trace.setSpan(ROOT_CONTEXT, span), () => {
+      logger.info('health');
+    });
+    span.end();
+
+    expect(lines[0]?.severity).toBe('INFO');
+    expect(lines[0]?.message).toBe('health');
+    expect(lines[0]?.[GCP_SPAN_ID_FIELD]).toBe(SPAN_ID);
+    expect(lines[0]).not.toHaveProperty(GCP_TRACE_FIELD);
+    expect(lines[0]).not.toHaveProperty('xray_trace_id');
+  });
+
+  it('drops xray_trace_id when CLOUD_PROVIDER=gcp and keeps the default field names', () => {
+    const provider = new BasicTracerProvider({
+      idGenerator: {
+        generateTraceId: () => TRACE_ID,
+        generateSpanId: () => SPAN_ID,
+      },
+    });
+    const span = provider.getTracer('test').startSpan('charge');
+    const { logger, lines } = captureLogger('payment', { cloudProvider: 'gcp' });
+
+    context.with(trace.setSpan(ROOT_CONTEXT, span), () => {
+      withOrderId('ord_1001', () => {
+        logger.info({ route: 'charge' }, 'charge requested');
+      });
+    });
+    span.end();
+
+    expect(lines[0]).toMatchObject({
+      level: 'info',
+      service: 'payment',
+      trace_id: TRACE_ID,
+      span_id: SPAN_ID,
+      orderId: 'ord_1001',
+      msg: 'charge requested',
+    });
+    expect(lines[0]).not.toHaveProperty('xray_trace_id');
+    expect(lines[0]).not.toHaveProperty('severity');
+    expect(lines[0]).not.toHaveProperty('message');
+  });
+
+  it('reads LOG_FORMAT and GCP_PROJECT_ID from the environment', () => {
+    const previousFormat = process.env.LOG_FORMAT;
+    const previousProject = process.env.GCP_PROJECT_ID;
+    process.env.LOG_FORMAT = 'gcp';
+    process.env.GCP_PROJECT_ID = 'otel-demo-spike';
+    try {
+      const provider = new BasicTracerProvider({
+        idGenerator: {
+          generateTraceId: () => TRACE_ID,
+          generateSpanId: () => SPAN_ID,
+        },
+      });
+      const span = provider.getTracer('test').startSpan('charge');
+      const { logger, lines } = captureLogger('shop');
+      context.with(trace.setSpan(ROOT_CONTEXT, span), () => {
+        logger.info('from env');
+      });
+      span.end();
+      expect(lines[0]?.severity).toBe('INFO');
+      expect(lines[0]?.message).toBe('from env');
+      expect(lines[0]?.[GCP_TRACE_FIELD]).toBe(`projects/otel-demo-spike/traces/${TRACE_ID}`);
+    } finally {
+      restoreEnv('LOG_FORMAT', previousFormat);
+      restoreEnv('GCP_PROJECT_ID', previousProject);
+    }
   });
 
   it('redacts secret bindings on child loggers', () => {

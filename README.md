@@ -28,6 +28,7 @@ services/payment       dummy charges: authorized, captured, declined, unknown
 services/delivery      handoff, packaging, shipped
 loadgen                open-loop shop load, fixed arrival rate, UTC spikes
 infra/aws              CDK demo stack, teardown, deploy guard, SSM fault-switch reader
+infra/gcp              GCP spike: Terraform for one Cloud Run service, pluggable fault switch
 docs                   architecture, telemetry, and teardown runbook
 docker-compose.yml     local Postgres and the four services
 ```

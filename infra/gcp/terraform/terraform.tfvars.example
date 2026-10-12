@@ -1,0 +1,21 @@
+# Required. GCP project id (not the project number).
+project_id = "your-project-id"
+
+# Required. Push this image to Artifact Registry before apply.
+# The host must match the region you deploy to (me-west1 by default).
+shop_image = "me-west1-docker.pkg.dev/your-project-id/otel-demo/shop:spike"
+
+# Optional. Default is me-west1 (Tel Aviv). Set europe-west1 to fall back.
+region = "me-west1"
+
+# Optional. Default false. The Pub/Sub topic and the billing budget are created
+# only when this is true. billing_account is required in that case.
+create_budget = false
+# billing_account   = "XXXXXX-XXXXXX-XXXXXX"
+# budget_amount_usd = 25
+
+# Optional. UTC minute when Scheduler scales the service to zero.
+hard_stop_utc = "2026-10-14T00:00:00Z"
+
+# Optional. Collector telemetry logs. Default error. Set info to raise them.
+# collector_log_level = "error"

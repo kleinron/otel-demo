@@ -1,0 +1,25 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: localhost:4318
+processors:
+  batch:
+    timeout: 5s
+exporters:
+  googlecloud:
+    project: ${project_id}
+extensions:
+  health_check:
+    # All interfaces. A localhost bind is invisible to Cloud Run's TCP startup probe.
+    endpoint: ${health_bind}
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [googlecloud]
+  telemetry:
+    logs:
+      level: ${collector_log_level}

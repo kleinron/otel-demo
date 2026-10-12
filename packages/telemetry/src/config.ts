@@ -3,6 +3,7 @@ import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
 } from '@opentelemetry/semantic-conventions';
+import { resolveCloudProvider, type CloudProvider } from './cloud.js';
 import { parseKeyValueList, resolveOtlpEndpoints, type OtlpEndpoints } from './otlp.js';
 
 export interface TelemetryOptions {
@@ -16,6 +17,8 @@ export interface TelemetryConfig extends OtlpEndpoints {
   resourceAttributes: Record<string, string>;
   protocol: 'http/protobuf';
   propagator: 'w3c-tracecontext';
+  /** `aws` keeps X-Ray-style trace ids. `gcp` uses standard W3C random ids. */
+  cloudProvider: CloudProvider;
 }
 
 export function resolveTelemetryConfig(
@@ -53,6 +56,7 @@ export function resolveTelemetryConfig(
     resourceAttributes,
     protocol: 'http/protobuf',
     propagator: 'w3c-tracecontext',
+    cloudProvider: resolveCloudProvider(env),
     ...resolveOtlpEndpoints(env),
   };
 }

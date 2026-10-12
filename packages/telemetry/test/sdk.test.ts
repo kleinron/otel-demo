@@ -9,6 +9,7 @@ import {
   now,
   resolveTelemetryConfig,
   toXrayTraceId,
+  type CloudIdGenerator,
 } from '../src/index.js';
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -29,6 +30,24 @@ describe('SDK wiring', () => {
     expect(sdkConfig.metricReaders).toHaveLength(1);
     expect(sdkConfig.views).toHaveLength(1);
     expect(new NodeSDK(sdkConfig)).toBeInstanceOf(NodeSDK);
+    const awsIds = sdkConfig.idGenerator as CloudIdGenerator;
+    expect(awsIds.kind).toBe('aws-xray');
+    const awsTraceId = awsIds.generateTraceId();
+    const seconds = Math.floor(Date.now() / 1000);
+    expect(Math.abs(Number.parseInt(awsTraceId.slice(0, 8), 16) - seconds)).toBeLessThan(5);
+  });
+
+  it('uses standard W3C random trace ids when CLOUD_PROVIDER=gcp', () => {
+    const config = resolveTelemetryConfig(
+      { CLOUD_PROVIDER: 'gcp', OTEL_EXPORTER_OTLP_ENDPOINT: 'http://collector.internal:4318' },
+      { serviceName: 'shop' },
+    );
+    expect(config.cloudProvider).toBe('gcp');
+    const sdkConfig = buildNodeSdkConfiguration(config);
+    const gcpIds = sdkConfig.idGenerator as CloudIdGenerator;
+    expect(gcpIds.kind).toBe('gcp-w3c');
+    expect(gcpIds.generateTraceId()).toMatch(/^[0-9a-f]{32}$/);
+    expect(gcpIds.generateSpanId()).toMatch(/^[0-9a-f]{16}$/);
   });
 });
 

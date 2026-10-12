@@ -1,0 +1,20 @@
+{
+  "name": "@otel-demo/infra-gcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "GCP spike: pluggable fault-switch providers. Terraform for the spike lives in terraform/.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./fault-switch": {
+      "types": "./dist/fault-switch.d.ts",
+      "import": "./dist/fault-switch.js"
+    }
+  },
+  "dependencies": {
+    "@otel-demo/infra-aws": "*"
+  }
+}
