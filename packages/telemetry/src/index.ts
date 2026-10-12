@@ -101,7 +101,15 @@ export {
   type OtlpEndpoints,
 } from './otlp.js';
 export { createTracePropagator, extractTraceContext, injectTraceHeaders } from './propagate.js';
-export { isSecretKey, redactLogValue, redactSensitiveText } from './redact.js';
+export { isSecretKey, redactLogEntry, redactLogValue, redactSensitiveText } from './redact.js';
+export {
+  CART_ID_KEY,
+  CART_REDACTED,
+  CART_UUID_PATTERN,
+  CartSpanProcessor,
+  currentCartId,
+  withCartBaggage,
+} from './cart.js';
 export {
   buildNodeSdkConfiguration,
   createTelemetrySdk,

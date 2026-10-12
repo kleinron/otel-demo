@@ -27,3 +27,13 @@ output "budget_display_name" {
   value       = var.create_budget ? google_billing_budget.spike[0].display_name : ""
   description = "Billing budget display name when create_budget is true. Empty otherwise."
 }
+
+output "sql_instances" {
+  value       = { for app in local.apps : app => google_sql_database_instance.app[app].connection_name }
+  description = "Cloud SQL connection names, one per service."
+}
+
+output "seed_command" {
+  value       = "gcloud run jobs execute ${google_cloud_run_v2_job.seed.name} --region ${var.region} --wait"
+  description = "Seed all four databases once."
+}

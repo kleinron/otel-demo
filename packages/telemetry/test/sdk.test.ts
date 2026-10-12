@@ -1,7 +1,8 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { W3CTraceContextPropagator } from '@opentelemetry/core';
+import { CompositePropagator } from '@opentelemetry/core';
+import { AlwaysOnSampler } from '@opentelemetry/sdk-trace-base';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { describe, expect, it } from 'vitest';
 import {
@@ -24,9 +25,10 @@ describe('SDK wiring', () => {
 
     expect(sdkConfig.autoDetectResources).toBe(false);
     expect(sdkConfig.instrumentations).toEqual([]);
-    expect(sdkConfig.textMapPropagator).toBeInstanceOf(W3CTraceContextPropagator);
+    expect(sdkConfig.textMapPropagator).toBeInstanceOf(CompositePropagator);
     expect(sdkConfig.serviceName).toBe('delivery');
-    expect(sdkConfig.traceExporter).toBeDefined();
+    expect(sdkConfig.sampler).toBeInstanceOf(AlwaysOnSampler);
+    expect(sdkConfig.spanProcessors).toHaveLength(2);
     expect(sdkConfig.metricReaders).toHaveLength(1);
     expect(sdkConfig.views).toHaveLength(1);
     expect(new NodeSDK(sdkConfig)).toBeInstanceOf(NodeSDK);

@@ -1,0 +1,12 @@
+# Cloud Build upload for infra/gcp/docker/cloudbuild.yaml. Keep local state and deps out.
+.git
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/.terraform
+**/*.tfstate*
+**/*.tfvars
+.env*
+results/
+raw/
+cdk.out/
