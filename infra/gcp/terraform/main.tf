@@ -96,6 +96,8 @@ resource "google_project_service" "required" {
       "artifactregistry.googleapis.com",
       "cloudscheduler.googleapis.com",
       "cloudtrace.googleapis.com",
+      # OTel metrics from the collector's googlecloud exporter.
+      "monitoring.googleapis.com",
       # OTLP endpoint the loadgen job exports its step spans to.
       "telemetry.googleapis.com",
       "secretmanager.googleapis.com",
@@ -137,6 +139,15 @@ resource "google_service_account" "hard_stop" {
 resource "google_project_iam_member" "trace_agent" {
   project = var.project_id
   role    = "roles/cloudtrace.agent"
+  member  = "serviceAccount:${google_service_account.shop.email}"
+}
+
+# The collector sidecar runs as the shop SA and writes OTel metrics
+# (workload.googleapis.com/*) to Cloud Monitoring. Without this the metrics
+# pipeline gets PERMISSION_DENIED on CreateTimeSeries.
+resource "google_project_iam_member" "metric_writer" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
   member  = "serviceAccount:${google_service_account.shop.email}"
 }
 
@@ -322,6 +333,7 @@ resource "google_cloud_run_v2_service" "shop" {
     google_cloud_scheduler_job.hard_stop,
     google_cloud_scheduler_job.sql_hard_stop,
     google_project_iam_member.cloudsql_client,
+    google_project_iam_member.metric_writer,
     google_secret_manager_secret_iam_member.db_password_accessor,
   ]
 }
