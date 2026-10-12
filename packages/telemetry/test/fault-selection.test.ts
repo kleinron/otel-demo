@@ -145,9 +145,7 @@ describe('database attempt hook', () => {
       beforeAttempt: databaseAttemptHook(c, 'inventory'),
     });
     exporter.reset();
-    await expect(sql.query('SELECT 1', [], 'stock.read')).rejects.toThrow(
-      /timeout/,
-    );
+    await expect(sql.query('SELECT 1', [], 'stock.read')).rejects.toThrow(/timeout/);
     expect(connects).toBe(0);
     const span = exporter.getFinishedSpans().find((s) => s.name === 'SELECT stock.read');
     const events = span?.events.map((e) => e.name);
