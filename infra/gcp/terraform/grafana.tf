@@ -34,6 +34,24 @@ resource "google_project_iam_member" "grafana" {
   member   = "serviceAccount:${google_service_account.grafana[0].email}"
 }
 
+# Deployer permissions to build the VM (approved by Ron, OTEL room, Oct 12
+# 19:21 IDT): compute instance + firewall admin on the project, and actAs on
+# the Grafana SA only. The deployer is var.sql_stop_service_account
+# (otel-deployer), which applies this module.
+resource "google_project_iam_member" "deployer_compute" {
+  for_each = var.grafana_enabled ? toset(["roles/compute.instanceAdmin.v1", "roles/compute.securityAdmin"]) : toset([])
+  project  = var.project_id
+  role     = each.value
+  member   = "serviceAccount:${var.sql_stop_service_account}"
+}
+
+resource "google_service_account_iam_member" "deployer_acts_as_grafana" {
+  count              = var.grafana_enabled ? 1 : 0
+  service_account_id = google_service_account.grafana[0].name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${var.sql_stop_service_account}"
+}
+
 resource "random_password" "grafana_admin" {
   count   = var.grafana_enabled ? 1 : 0
   length  = 32
@@ -77,7 +95,7 @@ resource "google_compute_disk" "grafana_data" {
   size   = 10
   labels = local.labels
 
-  depends_on = [google_project_service.compute]
+  depends_on = [google_project_service.compute, google_project_iam_member.deployer_compute]
 }
 
 resource "google_compute_instance" "grafana" {
@@ -129,6 +147,8 @@ resource "google_compute_instance" "grafana" {
   # A stop job exists before the VM runs, same as the shop.
   depends_on = [
     google_cloud_scheduler_job.grafana_hard_stop,
+    google_project_iam_member.deployer_compute,
+    google_service_account_iam_member.deployer_acts_as_grafana,
     google_secret_manager_secret_version.grafana_admin,
     google_secret_manager_secret_iam_member.grafana_admin_accessor,
   ]
@@ -155,7 +175,7 @@ resource "google_compute_firewall" "grafana" {
     }
   }
 
-  depends_on = [google_project_service.compute]
+  depends_on = [google_project_service.compute, google_project_iam_member.deployer_compute]
 }
 
 # Same hard stop as the shop (hard_stop_utc, 2026-10-14T00:00:00Z): stop the VM.
