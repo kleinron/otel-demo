@@ -4,6 +4,7 @@ data "google_project" "this" {
 
 locals {
   service_name     = "otel-demo-shop"
+  jobs_image       = var.jobs_image != "" ? var.jobs_image : var.service_image
   scheduler_region = var.scheduler_region != "" ? var.scheduler_region : var.region
   # minute hour day-of-month month day-of-week, UTC.
   # 2026-10-14T00:00:00Z becomes "0 0 14 10 *". See hardStopCron in src/hard-stop.ts.
@@ -175,6 +176,12 @@ resource "google_cloud_run_v2_service" "shop" {
   deletion_protection = false
   labels              = local.labels
 
+  # Service-level scaling as live has it (set by gcloud).
+  scaling {
+    min_instance_count    = 0
+    manual_instance_count = 0
+  }
+
   template {
     service_account = google_service_account.shop.email
     timeout         = "60s"
@@ -216,9 +223,14 @@ resource "google_cloud_run_v2_service" "shop" {
           cpu_idle = false
         }
 
-        volume_mounts {
-          name       = "cloudsql"
-          mount_path = "/cloudsql"
+        # Live only mounts the socket volume in the shop container (sidecars
+        # reach Cloud SQL through it all the same), so match that.
+        dynamic "volume_mounts" {
+          for_each = containers.value.name == "shop" ? ["cloudsql"] : []
+          content {
+            name       = volume_mounts.value
+            mount_path = "/cloudsql"
+          }
         }
 
         # Cloud Run reserves PORT and sets it for the ingress container. Do not set it here.

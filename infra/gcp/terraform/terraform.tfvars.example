@@ -4,6 +4,8 @@ project_id = "your-project-id"
 # Required. Build infra/gcp/docker/service.Dockerfile (linux/amd64) with Cloud Build first.
 # The host must match the region you deploy to (me-west1 by default).
 service_image = "me-west1-docker.pkg.dev/your-project-id/otel-demo/service:TAG"
+# Optional: pin the seed and loadgen jobs to their own image (empty = service_image).
+# jobs_image = ""
 
 # Required. Existing account that already has cloudsql.instances.update.
 # Scheduler acts as it to stop the Cloud SQL instances five minutes after hard_stop_utc.
