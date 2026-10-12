@@ -4,7 +4,7 @@ import {
   createHttpMetrics,
   createLogger,
   createOutboundMetrics,
-  databaseFaultHook,
+  databaseAttemptHook,
   getServiceMeter,
   startServiceFaultControl,
   inRootSpan,
@@ -25,7 +25,8 @@ await inRootSpan(SERVICE_NAME, 'startup', async () => {
   const databaseUrl = requiredEnv(env.DATABASE_URL, 'DATABASE_URL');
   const sql = createPgSql(databaseUrl, {
     timeoutMs: readTimeoutMs(env.DB_STATEMENT_TIMEOUT_MS, 5_000),
-    beforeQuery: databaseFaultHook(faults, SERVICE_NAME),
+    // Per attempt, so an injected DB timeout fails every retry, not just one.
+    beforeAttempt: databaseAttemptHook(faults, SERVICE_NAME),
     onConnectionError(error) {
       logger.warn({ err: error }, 'database connection error');
     },

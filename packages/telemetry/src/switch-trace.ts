@@ -1,5 +1,5 @@
 import { metrics, trace } from '@opentelemetry/api';
-import type { FaultControlLog, FaultSwitchReader } from './fault-control.js';
+import type { FaultControlLog, FaultSwitchReader, FaultSwitchValue } from './fault-control.js';
 import { inChildSpan, inRootSpanSync } from './trace-helpers.js';
 
 const TRACER = 'fault-control';
@@ -8,7 +8,7 @@ const TRACER = 'fault-control';
  * Read the switch. Inside a span (the startup read) the read gets its own
  * child span; the background poll has no active span and is not traced.
  */
-export function readSwitch(reader: FaultSwitchReader): Promise<boolean> {
+export function readSwitch(reader: FaultSwitchReader): Promise<FaultSwitchValue> {
   if (trace.getActiveSpan()) {
     return inChildSpan(TRACER, 'fault-switch read', () => reader.read());
   }
@@ -38,19 +38,30 @@ let changes: ReturnType<ReturnType<typeof metrics.getMeter>['createCounter']> | 
 
 /** One log line and one counter increment when the switch value changes (or is first read). */
 export function noteSwitchValue(
-  previous: boolean | undefined,
-  next: boolean,
+  previous: FaultSwitchValue | undefined,
+  next: FaultSwitchValue,
   log: FaultControlLog,
 ): void {
-  if (previous === next) {
+  if (previous !== undefined && switchLabel(previous) === switchLabel(next)) {
     return;
   }
   changes ??= metrics
     .getMeter(TRACER)
     .createCounter('fault_switch.changes', { description: 'Fault switch value changes seen' });
-  changes.add(1, { 'fault_switch.value': next ? 'on' : 'off' });
+  changes.add(1, { 'fault_switch.value': switchLabel(next) });
   log.info(previous === undefined ? 'fault switch read' : 'fault switch changed', {
-    from: previous === undefined ? null : previous ? 'on' : 'off',
-    to: next ? 'on' : 'off',
+    from: previous === undefined ? null : switchLabel(previous),
+    to: switchLabel(next),
   });
+}
+
+/** `on`, `off`, or the selected fault ids joined by commas. */
+export function switchLabel(value: FaultSwitchValue): string {
+  if (value === true) {
+    return 'on';
+  }
+  if (value === false || value.length === 0) {
+    return 'off';
+  }
+  return [...value].sort().join(',');
 }

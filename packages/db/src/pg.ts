@@ -21,6 +21,12 @@ export interface PgPoolOptions {
   retryBaseDelayMs?: number;
   /** Called when the pool or a query sees a connection-level error. */
   onConnectionError?: (error: unknown) => void;
+  /**
+   * Runs before every attempt, retries included. A transient error thrown here
+   * is retried like a real connection error, so an injected fault can fail
+   * every attempt instead of only the first.
+   */
+  beforeAttempt?: () => Promise<void>;
   /** Test hook: build the pool. */
   createPool?: (config: PoolConfig) => PoolLike;
 }
@@ -244,17 +250,19 @@ function createPgExecutor(
     ): Promise<SqlRows<T>> {
       // Writes in this repo carry an idempotency key (orderId / unique keys), so
       // a retry after a dropped connection is safe.
-      return withRetry(() =>
-        withClient(async (client) => {
+      return withRetry(async () => {
+        await options.beforeAttempt?.();
+        return withClient(async (client) => {
           const result = await client.query(text, params as unknown[]);
           return { rows: result.rows as T[] };
-        }),
-      );
+        });
+      });
     },
     transaction<T>(fn: (executor: QueryExecutor) => Promise<T>): Promise<T> {
       // Only the connect + BEGIN step is retried; once user work starts, an
       // error propagates so a half-done transaction is never replayed blindly.
       return withRetry(async () => {
+        await options.beforeAttempt?.();
         const client = await connect();
         try {
           await control(client, 'BEGIN');

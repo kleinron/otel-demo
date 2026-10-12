@@ -19,12 +19,21 @@ import {
 export const DEFAULT_FAULT_POLL_MS = 7_500;
 export const MIN_FAULT_POLL_MS = 5_000;
 export const MAX_FAULT_POLL_MS = 10_000;
-export const DEFAULT_FAULT_LAST_KNOWN_MS = 60_000;
-export const DEFAULT_FAULT_FAILURE_LIMIT = 3;
+/** Fail closed: one failed or timed-out read turns faults off at once. */
+export const DEFAULT_FAULT_LAST_KNOWN_MS = 0;
+export const DEFAULT_FAULT_FAILURE_LIMIT = 1;
+/** A switch read that takes longer than this counts as a failed read. */
+export const DEFAULT_FAULT_READ_TIMEOUT_MS = 3_000;
+
+/**
+ * `true` enables every configured fault, `false` none. A list enables only the
+ * faults with those ids, so each fault can be rehearsed alone.
+ */
+export type FaultSwitchValue = boolean | readonly string[];
 
 export interface FaultSwitchReader {
-  /** `true` enables faults. Throw when the switch cannot be read. */
-  read(): Promise<boolean>;
+  /** `true` enables faults; a list enables only those fault ids. Throw when unreadable. */
+  read(): Promise<FaultSwitchValue>;
 }
 
 export interface FaultSchedule {
@@ -57,6 +66,8 @@ export interface FaultControllerOptions {
   pollIntervalMs?: number;
   lastKnownTtlMs?: number;
   failureLimit?: number;
+  /** Reads slower than this fail (and so turn faults off). */
+  readTimeoutMs?: number;
 }
 
 const noopLog: FaultControlLog = {
@@ -230,9 +241,11 @@ export async function createFaultSwitchReader(
 
 export function createFaultController(options: FaultControllerOptions): FaultController {
   const log = tracedLog(options.log ?? noopLog);
-  let lastValue: boolean | undefined;
+  let lastValue: FaultSwitchValue | undefined;
+  let selection: FaultSwitchValue = false;
   const wallClock = options.wallClock ?? (() => Date.now());
   const random = options.random ?? Math.random;
+  const readTimeoutMs = options.readTimeoutMs ?? DEFAULT_FAULT_READ_TIMEOUT_MS;
   const lastKnownTtlMs = options.lastKnownTtlMs ?? DEFAULT_FAULT_LAST_KNOWN_MS;
   const failureLimit = options.failureLimit ?? DEFAULT_FAULT_FAILURE_LIMIT;
   const pollIntervalMs = clampPollInterval(options.pollIntervalMs ?? DEFAULT_FAULT_POLL_MS);
@@ -249,11 +262,12 @@ export function createFaultController(options: FaultControllerOptions): FaultCon
   async function pollOnce(): Promise<void> {
     const now = wallClock();
     try {
-      const value = await readSwitch(options.reader);
+      const value = await withReadTimeout(readSwitch(options.reader), readTimeoutMs);
       noteSwitchValue(lastValue, value, log);
       lastValue = value;
+      selection = value;
       consecutiveFailures = 0;
-      if (value) {
+      if (switchOn(value)) {
         enabled = true;
         enabledAtMs = now;
         operatorOffLogged = false;
@@ -273,6 +287,8 @@ export function createFaultController(options: FaultControllerOptions): FaultCon
       const age = enabledAtMs === undefined ? Number.POSITIVE_INFINITY : now - enabledAtMs;
       if (enabled && consecutiveFailures >= failureLimit && age >= lastKnownTtlMs) {
         enabled = false;
+        selection = false;
+        lastValue = undefined;
         if (!failSafeLogged) {
           log.warn('faults off by fail-safe', {
             at: isoUtc(now),
@@ -297,7 +313,7 @@ export function createFaultController(options: FaultControllerOptions): FaultCon
       log.info('fault window end', { at: isoUtc(windowEnd) });
       windowEndLogged = true;
     }
-    active = enabled && inWindow && options.schedule.faults.length > 0;
+    active = enabled && inWindow && selectFaults(options.schedule.faults, selection).length > 0;
     if (active && !windowStartLogged) {
       log.info('fault window start', { at: isoUtc(now) });
       windowStartLogged = true;
@@ -338,9 +354,47 @@ export function createFaultController(options: FaultControllerOptions): FaultCon
       if (windowStart !== undefined && now < windowStart) {
         return;
       }
-      await applyMatchedFault(options.schedule.faults, target, span, random);
+      await applyMatchedFault(
+        selectFaults(options.schedule.faults, selection),
+        target,
+        span,
+        random,
+      );
     },
   };
+}
+
+/** Whether a switch value turns any fault on. */
+export function switchOn(value: FaultSwitchValue): boolean {
+  return value === true || (Array.isArray(value) && value.length > 0);
+}
+
+/** The faults a switch value enables: all for `true`, none for `false`, else by id. */
+export function selectFaults(
+  faults: readonly FaultSpec[],
+  value: FaultSwitchValue,
+): readonly FaultSpec[] {
+  if (value === true) {
+    return faults;
+  }
+  if (value === false) {
+    return [];
+  }
+  const ids = new Set(value as readonly string[]);
+  return faults.filter((fault) => ids.has(fault.id));
+}
+
+/** Reject when the read takes longer than `ms`, so a hung read fails closed. */
+export function withReadTimeout<T>(read: Promise<T>, ms: number): Promise<T> {
+  if (!(ms > 0)) {
+    return read;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`fault switch read timed out after ${ms}ms`)), ms);
+    timer.unref?.();
+  });
+  return Promise.race([read, timeout]).finally(() => clearTimeout(timer));
 }
 
 export async function startFaultControl(
@@ -357,6 +411,7 @@ export async function startFaultControl(
     reader,
     log,
     pollIntervalMs: pollRaw,
+    readTimeoutMs: readTimeoutFromEnv(env),
   });
   await controller.pollOnce();
   controller.start();
@@ -411,13 +466,34 @@ function parseJson(raw: string, label: string): unknown {
   }
 }
 
-export function parseSwitchValue(value: string): boolean {
+export function readTimeoutFromEnv(env: Record<string, string | undefined>): number {
+  const raw = Number(env.FAULT_SWITCH_READ_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_FAULT_READ_TIMEOUT_MS;
+}
+
+/**
+ * `on`/`true`/`1`/`all` enable every fault; `off`/`false`/`0`/`none` none.
+ * Anything else is a comma-separated list of fault ids, e.g. `payment-delay`.
+ */
+export function parseSwitchValue(value: string): FaultSwitchValue {
   const normalized = value.trim().toLowerCase();
-  if (normalized === 'true' || normalized === '1' || normalized === 'on') {
+  if (normalized === 'true' || normalized === '1' || normalized === 'on' || normalized === 'all') {
     return true;
   }
-  if (normalized === 'false' || normalized === '0' || normalized === 'off') {
+  if (
+    normalized === 'false' ||
+    normalized === '0' ||
+    normalized === 'off' ||
+    normalized === 'none'
+  ) {
     return false;
+  }
+  const ids = normalized
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id) => id !== '');
+  if (ids.length > 0 && ids.every((id) => /^[a-z0-9][a-z0-9-]*$/.test(id))) {
+    return ids;
   }
   throw new Error('fault switch value is unreadable');
 }

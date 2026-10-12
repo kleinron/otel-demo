@@ -49,7 +49,12 @@ export {
   DEFAULT_FAULT_FAILURE_LIMIT,
   DEFAULT_FAULT_LAST_KNOWN_MS,
   DEFAULT_FAULT_POLL_MS,
+  DEFAULT_FAULT_READ_TIMEOUT_MS,
   FaultInjectedError,
+  selectFaults,
+  switchOn,
+  withReadTimeout,
+  type FaultSwitchValue,
   loadFaultSchedule,
   MAX_FAULT_POLL_MS,
   MIN_FAULT_POLL_MS,
@@ -171,7 +176,9 @@ export {
 } from './load-schedule.js';
 export {
   createWindowedFaultController,
+  databaseAttemptHook,
   databaseFaultHook,
+  InjectedDatabaseTimeout,
   loadPlanFromEnv,
   startScheduledFaultControl,
   startServiceFaultControl,
