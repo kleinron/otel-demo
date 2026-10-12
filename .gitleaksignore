@@ -1,0 +1,4 @@
+# Placeholder private IPs in test fixtures on PR #18's first commit (since replaced by db.invalid).
+844581a6fd476fa8422c50c38e50371344f181f1:packages/db/test/pg-recovery.test.ts:ipv4-address:43
+844581a6fd476fa8422c50c38e50371344f181f1:packages/telemetry/test/side-effect.test.ts:ipv4-address:174
+844581a6fd476fa8422c50c38e50371344f181f1:packages/telemetry/test/side-effect.test.ts:ipv4-address:178

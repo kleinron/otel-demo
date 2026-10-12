@@ -171,11 +171,11 @@ describe('errorFields', () => {
     });
     expect(
       errorFields(
-        Object.assign(new Error('connect ECONNREFUSED 10.0.0.1:5432'), { code: 'ECONNREFUSED' }),
+        Object.assign(new Error('connect ECONNREFUSED db.invalid:5432'), { code: 'ECONNREFUSED' }),
       ),
     ).toMatchObject({
       error_code: 'ECONNREFUSED',
-      error_message: 'connect ECONNREFUSED 10.0.0.1:5432',
+      error_message: 'connect ECONNREFUSED db.invalid:5432',
     });
     expect(errorFields(new Error("timeout during UPDATE x SET a='secret'"))).toEqual({
       error_name: 'Error',
