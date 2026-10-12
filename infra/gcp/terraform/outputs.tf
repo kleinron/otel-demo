@@ -37,3 +37,8 @@ output "seed_command" {
   value       = "gcloud run jobs execute ${google_cloud_run_v2_job.seed.name} --region ${var.region} --wait"
   description = "Seed all four databases once."
 }
+
+output "grafana_url" {
+  value       = var.grafana_enabled ? "http://${google_compute_instance.grafana[0].network_interface[0].access_config[0].nat_ip}:3000" : null
+  description = "Grafana URL (reachable only from grafana_allowed_cidrs)."
+}

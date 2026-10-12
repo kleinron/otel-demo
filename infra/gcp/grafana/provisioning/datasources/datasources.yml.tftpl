@@ -1,0 +1,26 @@
+# All three use the Cloud Run runtime identity (otel-demo-grafana SA) through
+# the metadata server: authenticationType gce, no key file anywhere.
+apiVersion: 1
+datasources:
+  - name: Google Cloud Monitoring
+    uid: gcm
+    type: stackdriver
+    access: proxy
+    isDefault: true
+    jsonData:
+      authenticationType: gce
+      defaultProject: ${project_id}
+  - name: Google Cloud Trace
+    uid: gct
+    type: googlecloud-trace-datasource
+    access: proxy
+    jsonData:
+      authenticationType: gce
+      defaultProject: ${project_id}
+  - name: Google Cloud Logging
+    uid: gcl
+    type: googlecloud-logging-datasource
+    access: proxy
+    jsonData:
+      authenticationType: gce
+      defaultProject: ${project_id}
