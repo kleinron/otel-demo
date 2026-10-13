@@ -9,7 +9,8 @@
  * span tree per request type, route-template names, cart.id on every span,
  * resource attributes, SQL hygiene, payment idempotency keys, and orphans
  * (the only allowed gap is Cloud Run's front-end parent). It then samples log
- * lines for trace/span ids and reads the collector's self-metrics line.
+ * lines for trace/span ids and reads the collector's self-metrics lines: the failure counters
+ * are cumulative, so it fails only if one increased between window start and end.
  * Exit code 0 only when every check passes.
  *
  * Auth: GOOGLE_OAUTH_ACCESS_TOKEN, else `gcloud auth print-access-token`.
@@ -136,18 +137,35 @@ const logs = await api<{ entries?: LogEntry[] }>('https://logging.googleapis.com
     pageSize: 300,
   }),
 });
-const collector = await api<{ entries?: LogEntry[] }>(
-  'https://logging.googleapis.com/v2/entries:list',
-  {
-    method: 'POST',
-    body: JSON.stringify({
-      resourceNames: [`projects/${project}`],
-      filter: `${revisionFilter} jsonPayload.message="collector self-metrics"`,
-      orderBy: 'timestamp desc',
-      pageSize: 20,
-    }),
-  },
-);
+// Self-metrics lines from shortly before the window (for the start baseline)
+// to the window end, oldest first; the counters are cumulative per instance.
+const collectorFilter = [
+  'resource.type="cloud_run_revision"',
+  `resource.labels.service_name="${service}"`,
+  `resource.labels.revision_name="${revision}"`,
+  `timestamp>="${new Date(startMs - 5 * 60_000).toISOString()}"`,
+  `timestamp<="${new Date(endMs).toISOString()}"`,
+  'jsonPayload.message="collector self-metrics"',
+].join(' ');
+const collectorEntries: LogEntry[] = [];
+let collectorPage: string | undefined;
+do {
+  const page = await api<{ entries?: LogEntry[]; nextPageToken?: string }>(
+    'https://logging.googleapis.com/v2/entries:list',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        resourceNames: [`projects/${project}`],
+        filter: collectorFilter,
+        orderBy: 'timestamp asc',
+        pageSize: 1000,
+        ...(collectorPage ? { pageToken: collectorPage } : {}),
+      }),
+    },
+  );
+  collectorEntries.push(...(page.entries ?? []));
+  collectorPage = page.nextPageToken;
+} while (collectorPage && collectorEntries.length < 10_000);
 
 const results: CheckResult[] = [
   {
@@ -166,7 +184,7 @@ const results: CheckResult[] = [
   checkPaymentKey(traces),
   checkFaultSwitch(traces, startups),
   checkLogs(logs.entries ?? [], knownSpans),
-  checkCollector(collector.entries ?? []),
+  checkCollector(collectorEntries, startMs),
 ];
 results.push(checkRequestRoots(traces));
 

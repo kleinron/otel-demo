@@ -22,6 +22,8 @@ export interface LogEntry {
   trace?: string;
   spanId?: string;
   labels?: Record<string, string>;
+  timestamp?: string;
+  resource?: { labels?: Record<string, string> };
   jsonPayload?: Record<string, unknown>;
   textPayload?: string;
 }
@@ -436,30 +438,59 @@ export function checkLogs(entries: LogEntry[], knownSpans?: Set<string>): CheckR
   );
 }
 
-export function checkCollector(entries: LogEntry[]): CheckResult {
+const COLLECTOR_FAIL_KEYS = [
+  'sendFailedSpans',
+  'enqueueFailedSpans',
+  'refusedSpans',
+  'failedSpans',
+  'droppedSpans',
+] as const;
+
+/**
+ * Collector failure counters are cumulative per collector process, so a
+ * lifetime value > 0 says nothing about the checked window. Per instance, take
+ * the counter at the window start (last line at or before `startMs`, else the
+ * first line in the window) and at the window end (last line), and fail only
+ * if it increased. A drop in value means the process restarted, so the end
+ * value itself is the increase. `entries` must be sorted by timestamp asc.
+ */
+export function checkCollector(entries: LogEntry[], startMs?: number): CheckResult {
   const failures: string[] = [];
+  const lines: string[] = [];
   if (entries.length === 0) {
     failures.push('no "collector self-metrics" log line');
   }
-  const latest = entries[0]?.jsonPayload?.collector as Record<string, number> | undefined;
+  const byInstance = new Map<string, LogEntry[]>();
   for (const entry of entries) {
-    const stats = entry.jsonPayload?.collector as Record<string, number> | undefined;
-    for (const key of [
-      'sendFailedSpans',
-      'enqueueFailedSpans',
-      'refusedSpans',
-      'failedSpans',
-      'droppedSpans',
-    ]) {
-      if ((stats?.[key] ?? 0) !== 0) {
-        failures.push(`${key}=${stats?.[key]}`);
+    const id = entry.labels?.instanceId ?? entry.resource?.labels?.instance_id ?? 'default';
+    byInstance.set(id, [...(byInstance.get(id) ?? []), entry]);
+  }
+  for (const [id, list] of byInstance) {
+    const atOrBefore =
+      startMs === undefined
+        ? []
+        : list.filter((e) => e.timestamp && Date.parse(e.timestamp) <= startMs);
+    const first = atOrBefore.at(-1) ?? list[0];
+    const last = list.at(-1);
+    const from = first?.jsonPayload?.collector as Record<string, number> | undefined;
+    const to = last?.jsonPayload?.collector as Record<string, number> | undefined;
+    const short = id.slice(-8);
+    for (const key of COLLECTOR_FAIL_KEYS) {
+      const a = Number(from?.[key] ?? 0);
+      const b = Number(to?.[key] ?? 0);
+      const increase = b >= a ? b - a : b;
+      lines.push(`${short} ${key} start=${a} end=${b} increase=${increase}`);
+      if (increase > 0) {
+        failures.push(`instance ${short}: ${key} start=${a} end=${b} increase=${increase}`);
       }
     }
   }
   return result(
-    'collector dropped/failed counts are 0',
+    'collector dropped/failed counters did not increase in window',
     [...new Set(failures)],
-    latest ? JSON.stringify(latest) : 'none',
+    lines.length
+      ? `${byInstance.size} instance(s), ${entries.length} lines; ${lines.join('; ')}`
+      : 'none',
   );
 }
 
