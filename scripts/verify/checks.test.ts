@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   checkCartId,
+  checkCollector,
   checkLogs,
   checkNoOrphans,
   checkRequestRoots,
@@ -107,5 +108,44 @@ describe('verify-traces checks', () => {
 
   it('converts decimal span ids', () => {
     expect(hexSpanId('255')).toBe('00000000000000ff');
+  });
+});
+
+describe('checkCollector', () => {
+  const line = (ts: string, sendFailedSpans: number, instanceId = 'i1') => ({
+    timestamp: ts,
+    labels: { instanceId },
+    jsonPayload: { collector: { sendFailedSpans, droppedSpans: 0 } },
+  });
+  const start = Date.parse('2026-10-13T12:00:00Z');
+
+  it('passes when a non-zero lifetime counter does not increase', () => {
+    const r = checkCollector(
+      [line('2026-10-13T11:59:30Z', 69), line('2026-10-13T12:05:00Z', 69)],
+      start,
+    );
+    expect(r.pass).toBe(true);
+    expect(r.detail).toContain('sendFailedSpans start=69 end=69 increase=0');
+  });
+
+  it('fails when the counter increases in the window', () => {
+    const r = checkCollector(
+      [line('2026-10-13T11:59:30Z', 69), line('2026-10-13T12:05:00Z', 72)],
+      start,
+    );
+    expect(r.pass).toBe(false);
+    expect(r.failures[0]).toContain('start=69 end=72 increase=3');
+  });
+
+  it('treats a counter reset as a restart and counts the end value', () => {
+    const r = checkCollector(
+      [line('2026-10-13T11:59:30Z', 69), line('2026-10-13T12:05:00Z', 2)],
+      start,
+    );
+    expect(r.pass).toBe(false);
+  });
+
+  it('fails without any self-metrics line', () => {
+    expect(checkCollector([], start).pass).toBe(false);
   });
 });
