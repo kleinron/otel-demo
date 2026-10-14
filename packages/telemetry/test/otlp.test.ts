@@ -19,6 +19,7 @@ describe('OTLP configuration', () => {
 
     expect(endpoints.tracesUrl).toBe('http://localhost:4318/v1/traces');
     expect(endpoints.metricsUrl).toBe('http://localhost:4318/v1/metrics');
+    expect(endpoints.logsUrl).toBe('http://localhost:4318/v1/logs');
   });
 
   it('uses the spec default endpoint when none is set', () => {
@@ -26,6 +27,11 @@ describe('OTLP configuration', () => {
 
     expect(endpoints.tracesUrl).toBe(`${DEFAULT_OTLP_HTTP_ENDPOINT}/v1/traces`);
     expect(endpoints.metricsUrl).toBe(`${DEFAULT_OTLP_HTTP_ENDPOINT}/v1/metrics`);
+    expect(endpoints.logsUrl).toBe(`${DEFAULT_OTLP_HTTP_ENDPOINT}/v1/logs`);
+    expect(resolveTelemetryConfig({ OTEL_SERVICE_NAME: 'shop' }).logsEnabled).toBe(false);
+    expect(
+      resolveTelemetryConfig({ OTEL_SERVICE_NAME: 'shop' }).metricExportIntervalMillis,
+    ).toBeUndefined();
   });
 
   it('lets signal-specific endpoints and headers override the base', () => {
@@ -47,6 +53,46 @@ describe('OTLP configuration', () => {
       'x-team': 'demo',
       Authorization: 'Bearer shared',
     });
+    expect(endpoints.logsUrl).toBe('http://collector.internal:4318/v1/logs');
+    expect(endpoints.logsHeaders).toEqual({
+      'x-team': 'demo',
+      Authorization: 'Bearer shared',
+    });
+  });
+
+  it('exports logs only when OTEL_LOGS_EXPORTER=otlp and honors the metric interval', () => {
+    const enabled = resolveTelemetryConfig(
+      {
+        OTEL_LOGS_EXPORTER: 'otlp',
+        OTEL_METRIC_EXPORT_INTERVAL: '10000',
+        OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: 'https://logs.collector.internal/v1/logs',
+        OTEL_EXPORTER_OTLP_LOGS_HEADERS: 'Authorization=Bearer%20logs',
+      },
+      { serviceName: 'shop' },
+    );
+    expect(enabled.logsEnabled).toBe(true);
+    expect(enabled.logsUrl).toBe('https://logs.collector.internal/v1/logs');
+    expect(enabled.logsHeaders.Authorization).toBe('Bearer logs');
+    expect(enabled.metricExportIntervalMillis).toBe(10_000);
+    expect(
+      resolveTelemetryConfig({ OTEL_SERVICE_NAME: 'shop', OTEL_LOGS_EXPORTER: 'none' }).logsEnabled,
+    ).toBe(false);
+    expect(
+      resolveTelemetryConfig({
+        OTEL_SERVICE_NAME: 'shop',
+        OTEL_SDK_DISABLED: 'true',
+        OTEL_LOGS_EXPORTER: 'otlp',
+      }).logsEnabled,
+    ).toBe(false);
+    expect(() =>
+      resolveTelemetryConfig({ OTEL_LOGS_EXPORTER: 'console' }, { serviceName: 'shop' }),
+    ).toThrow(/otlp or none/);
+    expect(() =>
+      resolveTelemetryConfig({ OTEL_METRIC_EXPORT_INTERVAL: '500', OTEL_SERVICE_NAME: 'shop' }),
+    ).toThrow(/OTEL_METRIC_EXPORT_INTERVAL/);
+    expect(() => resolveOtlpEndpoints({ OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: 'grpc' })).toThrow(
+      /http\/protobuf/,
+    );
   });
 
   it('rejects non-HTTP protocols and exporters other than OTLP/HTTP protobuf', () => {

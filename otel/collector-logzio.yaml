@@ -1,0 +1,134 @@
+# Logz.io export plus the debug exporter. Select this file with
+# OTEL_COLLECTOR_CONFIG=/etc/otelcol-contrib/collector-logzio.yaml
+# after .env has the three shipping tokens and the listener hosts.
+# No sampler: every span is exported.
+#
+# Traces and logs go out over OTLP/HTTP. Their queues are file_storage on
+# /var/lib/otelcol/file_storage so a dropped connection retries from disk.
+# prometheusremotewrite does not accept sending_queue. Its queue is
+# remote_write_queue and its disk buffer is the write-ahead log on the same volume.
+
+receivers:
+  otlp:
+    protocols:
+      # 0.128 binds an omitted endpoint to localhost, which other containers
+      # cannot reach. ":4317" listens on every interface without an address literal.
+      grpc:
+        endpoint: ':4317'
+      http:
+        endpoint: ':4318'
+
+processors:
+  batch:
+    timeout: 5s
+  attributes/metrics_drop_ids:
+    actions:
+      - { key: cart.id, action: delete }
+      - { key: order.id, action: delete }
+      - { key: order_id, action: delete }
+      - { key: payment.idempotency_key, action: delete }
+      - { key: url.full, action: delete }
+      - { key: url.path, action: delete }
+  resource/metrics_drop_ids:
+    attributes:
+      - { key: cart.id, action: delete }
+      - { key: order.id, action: delete }
+  resource/logzio_region:
+    attributes:
+      - key: logzio.region
+        value: ${env:LOGZIO_REGION}
+        action: upsert
+
+exporters:
+  debug:
+    verbosity: detailed
+  otlphttp/logzio_traces:
+    endpoint: ${env:LOGZIO_TRACES_ENDPOINT}
+    headers:
+      Authorization: 'Bearer ${env:LOGZIO_TRACING_TOKEN}'
+      user-agent: logzio-opentelemetry-traces
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 0
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 5000
+      storage: file_storage/traces
+  otlphttp/logzio_logs:
+    endpoint: ${env:LOGZIO_LOGS_ENDPOINT}
+    headers:
+      Authorization: 'Bearer ${env:LOGZIO_LOGS_TOKEN}'
+      user-agent: logzio-opentelemetry-logs
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 0
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 5000
+      storage: file_storage/logs
+  prometheusremotewrite/logzio:
+    endpoint: ${env:LOGZIO_METRICS_ENDPOINT}
+    headers:
+      Authorization: 'Bearer ${env:LOGZIO_METRICS_TOKEN}'
+      user-agent: logzio-opentelemetry-metrics
+    external_labels:
+      p8s_logzio_name: otel-demo
+    resource_to_telemetry_conversion:
+      enabled: true
+    add_metric_suffixes: false
+    target_info:
+      enabled: false
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 0
+    remote_write_queue:
+      enabled: true
+      queue_size: 5000
+      num_consumers: 4
+    wal:
+      directory: /var/lib/otelcol/file_storage/metrics
+
+extensions:
+  health_check:
+    endpoint: localhost:13133
+  file_storage/traces:
+    directory: /var/lib/otelcol/file_storage/traces
+    timeout: 10s
+    create_directory: true
+  file_storage/logs:
+    directory: /var/lib/otelcol/file_storage/logs
+    timeout: 10s
+    create_directory: true
+
+service:
+  extensions: [health_check, file_storage/traces, file_storage/logs]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [resource/logzio_region, batch]
+      exporters: [debug, otlphttp/logzio_traces]
+    metrics:
+      receivers: [otlp]
+      processors:
+        [resource/metrics_drop_ids, attributes/metrics_drop_ids, resource/logzio_region, batch]
+      exporters: [debug, prometheusremotewrite/logzio]
+    logs:
+      receivers: [otlp]
+      processors: [resource/logzio_region, batch]
+      exporters: [debug, otlphttp/logzio_logs]
+  telemetry:
+    logs:
+      level: info

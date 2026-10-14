@@ -72,3 +72,9 @@ Keep this file. The same catalog could target another Grafana data source set. A
 | `severity`               | Notification channel. Informational policies do not page                                                                          |
 | `why`                    | Policy documentation                                                                                                              |
 | `experiment-budget`      | Cloud Billing budget at the same percentage of the configured experiment budget, retained after the workload is deleted           |
+
+## Logz.io and Prometheus names
+
+This catalog does not embed a metric prefix. The GCP dashboard under `infra/gcp/grafana` queries `workload.googleapis.com/...`, which PromQL writes as `workload_googleapis_com:`. Logz.io, fed by the collector's `prometheusremotewrite` exporter, does not add that prefix.
+
+The local Logz.io config sets `add_metric_suffixes: false` and turns resource attributes into labels. Dots in the instrument name become underscores. A service's `http.server.requests` counter is `http_server_requests` with a `service_name` label, not `workload_googleapis_com:http_server_requests` and not `http_server_requests_total`. Histogram series still gain `_bucket`, `_sum`, and `_count`. `http.server.request.duration` (unit `ms`) shows up under a `http_server_request_duration` name. `outbound.calls` is `outbound_calls`. Confirm the series in the Logz.io metric explorer after the first export. Keep the `workload.googleapis.com` names for the GCP dashboard only.

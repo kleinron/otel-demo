@@ -19,6 +19,13 @@ export interface TelemetryConfig extends OtlpEndpoints {
   propagator: 'w3c-tracecontext';
   /** `aws` keeps X-Ray-style trace ids. `gcp` uses standard W3C random ids. */
   cloudProvider: CloudProvider;
+  /** OTLP log export. Unset `OTEL_LOGS_EXPORTER` keeps stdout-only logs. */
+  logsEnabled: boolean;
+  /**
+   * `OTEL_METRIC_EXPORT_INTERVAL` in milliseconds. Unset keeps the SDK
+   * default (60s).
+   */
+  metricExportIntervalMillis?: number;
 }
 
 export function resolveTelemetryConfig(
@@ -50,15 +57,44 @@ export function resolveTelemetryConfig(
     resourceAttributes[ATTR_DEPLOYMENT_ENVIRONMENT_NAME] = deployment;
   }
 
+  const sdkDisabled = isSdkDisabled(env.OTEL_SDK_DISABLED);
   return {
-    sdkDisabled: isSdkDisabled(env.OTEL_SDK_DISABLED),
+    sdkDisabled,
     serviceName,
     resourceAttributes,
     protocol: 'http/protobuf',
     propagator: 'w3c-tracecontext',
     cloudProvider: resolveCloudProvider(env),
+    logsEnabled: !sdkDisabled && logsExportRequested(env),
+    metricExportIntervalMillis: metricExportInterval(env),
     ...resolveOtlpEndpoints(env),
   };
+}
+
+/** `OTEL_LOGS_EXPORTER=otlp` copies JSON logs to the collector. Unset and `none` do not. */
+export function logsExportRequested(env: Record<string, string | undefined>): boolean {
+  const raw = env.OTEL_LOGS_EXPORTER?.trim().toLowerCase() ?? '';
+  if (raw === '' || raw === 'none') {
+    return false;
+  }
+  if (raw === 'otlp') {
+    return true;
+  }
+  throw new Error(`OTEL_LOGS_EXPORTER must be otlp or none (received ${raw})`);
+}
+
+function metricExportInterval(env: Record<string, string | undefined>): number | undefined {
+  const raw = env.OTEL_METRIC_EXPORT_INTERVAL?.trim();
+  if (!raw) {
+    return undefined;
+  }
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1000) {
+    throw new Error(
+      'OTEL_METRIC_EXPORT_INTERVAL must be an integer number of milliseconds, at least 1000',
+    );
+  }
+  return value;
 }
 
 function isSdkDisabled(value: string | undefined): boolean {

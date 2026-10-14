@@ -1,5 +1,7 @@
 import { context, isSpanContextValid, TraceFlags, trace } from '@opentelemetry/api';
+import { Writable } from 'node:stream';
 import pino, { type DestinationStream, type Logger } from 'pino';
+import { exportLogLine, logsExportEnabled } from './log-export.js';
 import {
   GCP_SPAN_ID_FIELD,
   GCP_TRACE_FIELD,
@@ -106,10 +108,41 @@ export function createLogger(options: LoggerOptions): Logger {
   const projectId = resolveGcpProjectId({
     GCP_PROJECT_ID: options.gcpProjectId ?? env.GCP_PROJECT_ID,
   });
+  const destination = logsExportEnabled()
+    ? teeLogDestination(options.destination)
+    : options.destination;
   if (format === 'gcp') {
-    return pino(gcpOptions(options.service, level, projectId), options.destination);
+    return pino(gcpOptions(options.service, level, projectId), destination);
   }
-  return pino(defaultOptions(options.service, level, cloudProvider), options.destination);
+  return pino(defaultOptions(options.service, level, cloudProvider), destination);
+}
+
+/**
+ * Stdout (or the caller's stream) stays the log line. A second write copies
+ * the same JSON to the OTLP logger, including `trace_id` and `span_id`.
+ */
+function teeLogDestination(inner: DestinationStream | undefined): DestinationStream {
+  return new Writable({
+    write(chunk, _encoding, callback) {
+      const text = typeof chunk === 'string' ? chunk : chunk.toString();
+      try {
+        if (inner) {
+          inner.write(text);
+        } else {
+          process.stdout.write(text);
+        }
+      } catch (error) {
+        callback(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      try {
+        exportLogLine(text);
+      } catch {
+        // A collector outage must not drop the stdout line.
+      }
+      callback();
+    },
+  });
 }
 
 function sharedRedact(): {

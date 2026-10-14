@@ -6,8 +6,10 @@ export const OTLP_HTTP_PROTOCOL = 'http/protobuf';
 export interface OtlpEndpoints {
   tracesUrl: string;
   metricsUrl: string;
+  logsUrl: string;
   tracesHeaders: Record<string, string>;
   metricsHeaders: Record<string, string>;
+  logsHeaders: Record<string, string>;
 }
 
 export function parseKeyValueList(input: string | undefined): Record<string, string> {
@@ -57,6 +59,7 @@ export function resolveOtlpEndpoints(env: Record<string, string | undefined>): O
   assertProtocol(env.OTEL_EXPORTER_OTLP_PROTOCOL, 'OTEL_EXPORTER_OTLP_PROTOCOL');
   assertProtocol(env.OTEL_EXPORTER_OTLP_TRACES_PROTOCOL, 'OTEL_EXPORTER_OTLP_TRACES_PROTOCOL');
   assertProtocol(env.OTEL_EXPORTER_OTLP_METRICS_PROTOCOL, 'OTEL_EXPORTER_OTLP_METRICS_PROTOCOL');
+  assertProtocol(env.OTEL_EXPORTER_OTLP_LOGS_PROTOCOL, 'OTEL_EXPORTER_OTLP_LOGS_PROTOCOL');
 
   const base = normalizeBase(env.OTEL_EXPORTER_OTLP_ENDPOINT ?? DEFAULT_OTLP_HTTP_ENDPOINT);
   const tracesUrl = env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
@@ -71,11 +74,18 @@ export function resolveOtlpEndpoints(env: Record<string, string | undefined>): O
         'OTEL_EXPORTER_OTLP_METRICS_ENDPOINT',
       ).toString()
     : joinSignal(base, '/v1/metrics');
+  const logsUrl = env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
+    ? assertHttpUrl(
+        env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+        'OTEL_EXPORTER_OTLP_LOGS_ENDPOINT',
+      ).toString()
+    : joinSignal(base, '/v1/logs');
 
   const sharedHeaders = parseKeyValueList(env.OTEL_EXPORTER_OTLP_HEADERS);
   return {
     tracesUrl,
     metricsUrl,
+    logsUrl,
     tracesHeaders: {
       ...sharedHeaders,
       ...parseKeyValueList(env.OTEL_EXPORTER_OTLP_TRACES_HEADERS),
@@ -83,6 +93,10 @@ export function resolveOtlpEndpoints(env: Record<string, string | undefined>): O
     metricsHeaders: {
       ...sharedHeaders,
       ...parseKeyValueList(env.OTEL_EXPORTER_OTLP_METRICS_HEADERS),
+    },
+    logsHeaders: {
+      ...sharedHeaders,
+      ...parseKeyValueList(env.OTEL_EXPORTER_OTLP_LOGS_HEADERS),
     },
   };
 }

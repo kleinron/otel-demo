@@ -37,6 +37,8 @@ The curve targets about 100k cart activities and 3k checkouts per day, plus brow
 
 `LOADGEN_START_UTC` and `LOADGEN_SEED` override the file. Services must see the same values. The generator also refuses to run past 72 hours or above 60 arrivals/second. The schedule cap is 40/s, which is above the saturation peak.
 
+`LOADGEN_CARTS_PER_MINUTE` is a local rate. `1` is about one cart activity per minute, all day, and checkout, browse, and order-status stay in proportion to this file (rounded to a whole activity per day). The diurnal curve, the warm-up gap, and the spike multipliers do not change that rate. Fault definitions in the file are unchanged; the services do not read this variable, so AWS and GCP fault windows stay on the file. When `LOADGEN_START_UTC` is unset, the local run starts at process start and still stops after 72 hours. Unset `LOADGEN_CARTS_PER_MINUTE` leaves the file in charge. Compose defaults it to `1`. The AWS and GCP tasks do not set it.
+
 ## Run
 
 ```bash
