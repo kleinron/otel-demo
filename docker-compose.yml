@@ -1,5 +1,12 @@
-# Local databases and services. Postgres trusts connections on this private compose network.
+# Local databases, services, and the OpenTelemetry collector.
+# Postgres trusts connections on this private compose network.
 # Do not reuse that setting outside local development.
+#
+# The collector defaults to otel/collector.yaml (debug exporter, no tokens).
+# Set OTEL_COLLECTOR_CONFIG in .env to the Logz.io file to export. See the
+# "Run locally with Logz.io" section of the README.
+# Seed is not a service. `npm run seed` drops shop and inventory data, so it
+# stays an explicit step and a restart does not wipe the volume.
 
 x-http-health: &http-health
   interval: 2s
@@ -13,9 +20,16 @@ x-http-health: &http-health
       "fetch('http://localhost:' + process.env.PORT + '/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
     ]
 
+x-otel-env: &otel-env
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  OTEL_LOGS_EXPORTER: otlp
+  OTEL_METRIC_EXPORT_INTERVAL: '10000'
+  DEPLOYMENT_ENVIRONMENT: local
+
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: otel
       POSTGRES_DB: postgres
@@ -23,6 +37,7 @@ services:
     ports:
       - '5432:5432'
     volumes:
+      - postgres-data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U otel -d postgres']
@@ -30,14 +45,74 @@ services:
       timeout: 2s
       retries: 20
 
+  # The contrib image runs as uid 10001 and cannot create files on a fresh
+  # named volume. This one-shot creates the queue directories and hands them
+  # to that user. It does not seed application data.
+  otel-collector-init:
+    image: busybox:1.36.1
+    user: '0:0'
+    command:
+      [
+        'sh',
+        '-c',
+        'mkdir -p /var/lib/otelcol/file_storage/traces /var/lib/otelcol/file_storage/logs /var/lib/otelcol/file_storage/metrics && chown -R 10001:10001 /var/lib/otelcol/file_storage',
+      ]
+    volumes:
+      - otel-collector-queue:/var/lib/otelcol/file_storage
+    restart: 'no'
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.128.0
+    restart: unless-stopped
+    command:
+      - --config=${OTEL_COLLECTOR_CONFIG:-/etc/otelcol-contrib/config.yaml}
+    environment:
+      LOGZIO_TRACING_TOKEN: ${LOGZIO_TRACING_TOKEN:-}
+      LOGZIO_LOGS_TOKEN: ${LOGZIO_LOGS_TOKEN:-}
+      LOGZIO_METRICS_TOKEN: ${LOGZIO_METRICS_TOKEN:-}
+      LOGZIO_REGION: ${LOGZIO_REGION:-us}
+      LOGZIO_TRACES_ENDPOINT: ${LOGZIO_TRACES_ENDPOINT:-https://otlp-listener.logz.io:4318}
+      LOGZIO_LOGS_ENDPOINT: ${LOGZIO_LOGS_ENDPOINT:-https://otlp-listener.logz.io:4318}
+      LOGZIO_METRICS_ENDPOINT: ${LOGZIO_METRICS_ENDPOINT:-https://listener.logz.io:8053}
+    ports:
+      - '4317:4317'
+      - '4318:4318'
+    volumes:
+      - ./otel/collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - ./otel/collector-logzio.yaml:/etc/otelcol-contrib/collector-logzio.yaml:ro
+      - otel-collector-queue:/var/lib/otelcol/file_storage
+    depends_on:
+      otel-collector-init:
+        condition: service_completed_successfully
+
+  # The collector image has no shell and no HTTP client. This process shares
+  # its network namespace and is the healthcheck the services wait on.
+  otel-collector-ready:
+    image: busybox:1.36.1
+    restart: unless-stopped
+    network_mode: service:otel-collector
+    command: ['sleep', 'infinity']
+    depends_on:
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://localhost:13133/']
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 5s
+
   inventory:
     build:
       context: .
       dockerfile: services/inventory/Dockerfile
+    restart: unless-stopped
     environment:
+      <<: *otel-env
       DATABASE_URL: postgres://otel@postgres:5432/inventory
       LISTEN_ANY: 'true'
       PORT: '3002'
+      OTEL_SERVICE_NAME: inventory
       OTEL_DEMO_LOAD_SCHEDULE_FILE: /app/loadgen/schedule.json
       OTEL_DEMO_FAULTS_ENABLED: ${OTEL_DEMO_FAULTS_ENABLED:-false}
     ports:
@@ -45,17 +120,22 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      otel-collector-ready:
+        condition: service_healthy
     healthcheck: *http-health
 
   payment:
     build:
       context: .
       dockerfile: services/payment/Dockerfile
+    restart: unless-stopped
     environment:
+      <<: *otel-env
       DATABASE_URL: postgres://otel@postgres:5432/payment
       PAYMENT_LATENCY_MS: '0'
       LISTEN_ANY: 'true'
       PORT: '3003'
+      OTEL_SERVICE_NAME: payment
       OTEL_DEMO_LOAD_SCHEDULE_FILE: /app/loadgen/schedule.json
       OTEL_DEMO_FAULTS_ENABLED: ${OTEL_DEMO_FAULTS_ENABLED:-false}
     ports:
@@ -63,16 +143,21 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      otel-collector-ready:
+        condition: service_healthy
     healthcheck: *http-health
 
   delivery:
     build:
       context: .
       dockerfile: services/delivery/Dockerfile
+    restart: unless-stopped
     environment:
+      <<: *otel-env
       DATABASE_URL: postgres://otel@postgres:5432/delivery
       LISTEN_ANY: 'true'
       PORT: '3004'
+      OTEL_SERVICE_NAME: delivery
       OTEL_DEMO_LOAD_SCHEDULE_FILE: /app/loadgen/schedule.json
       OTEL_DEMO_FAULTS_ENABLED: ${OTEL_DEMO_FAULTS_ENABLED:-false}
     ports:
@@ -80,25 +165,32 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      otel-collector-ready:
+        condition: service_healthy
     healthcheck: *http-health
 
   shop:
     build:
       context: .
       dockerfile: services/shop/Dockerfile
+    restart: unless-stopped
     environment:
+      <<: *otel-env
       DATABASE_URL: postgres://otel@postgres:5432/shop
       INVENTORY_URL: http://inventory:3002
       PAYMENT_URL: http://payment:3003
       DELIVERY_URL: http://delivery:3004
       LISTEN_ANY: 'true'
       PORT: '3001'
+      OTEL_SERVICE_NAME: shop
       OTEL_DEMO_LOAD_SCHEDULE_FILE: /app/loadgen/schedule.json
       OTEL_DEMO_FAULTS_ENABLED: ${OTEL_DEMO_FAULTS_ENABLED:-false}
     ports:
       - '3001:3001'
     depends_on:
       postgres:
+        condition: service_healthy
+      otel-collector-ready:
         condition: service_healthy
       inventory:
         condition: service_healthy
@@ -113,8 +205,28 @@ services:
     build:
       context: .
       dockerfile: loadgen/Dockerfile
+    restart: unless-stopped
     environment:
       SHOP_URL: http://shop:3001
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: loadgen
+      LOADGEN_CARTS_PER_MINUTE: ${LOADGEN_CARTS_PER_MINUTE:-1}
     depends_on:
       shop:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "const c=require('fs').readFileSync('/proc/1/cmdline','utf8'); if(!c.includes('main.js')) process.exit(1)",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  postgres-data:
+  otel-collector-queue:

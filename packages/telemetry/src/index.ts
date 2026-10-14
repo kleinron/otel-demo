@@ -136,6 +136,7 @@ export {
 } from './outbound.js';
 export { toXrayTraceId } from './xray.js';
 export {
+  applyLocalCartRate,
   applyRuntimeOverrides,
   arrivalsInSlot,
   arrivalRatePerSecond,

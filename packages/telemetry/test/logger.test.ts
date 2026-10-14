@@ -1,8 +1,14 @@
 import { context, ROOT_CONTEXT, trace } from '@opentelemetry/api';
+import { logs } from '@opentelemetry/api-logs';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import { Writable } from 'node:stream';
+import {
+  InMemoryLogRecordExporter,
+  LoggerProvider,
+  SimpleLogRecordProcessor,
+} from '@opentelemetry/sdk-logs';
 import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   GCP_SPAN_ID_FIELD,
   GCP_TRACE_FIELD,
@@ -51,7 +57,10 @@ function captureLogger(
   };
 }
 
-function restoreEnv(name: 'LOG_FORMAT' | 'GCP_PROJECT_ID', previous: string | undefined): void {
+function restoreEnv(
+  name: 'LOG_FORMAT' | 'GCP_PROJECT_ID' | 'OTEL_LOGS_EXPORTER' | 'OTEL_SDK_DISABLED',
+  previous: string | undefined,
+): void {
   if (previous === undefined) {
     delete process.env[name];
   } else {
@@ -296,5 +305,103 @@ describe('structured logs', () => {
       orderId: 'ord_7',
       msg: 'captured',
     });
+  });
+});
+
+describe('OTLP log export', () => {
+  const exporter = new InMemoryLogRecordExporter();
+  const provider = new LoggerProvider({
+    processors: [new SimpleLogRecordProcessor({ exporter })],
+  });
+
+  afterEach(() => {
+    exporter.reset();
+    restoreEnv('OTEL_LOGS_EXPORTER', undefined);
+    restoreEnv('OTEL_SDK_DISABLED', undefined);
+  });
+
+  it('copies trace_id and span_id onto the OTLP record without changing the stdout line', () => {
+    delete process.env.OTEL_LOGS_EXPORTER;
+    delete process.env.OTEL_SDK_DISABLED;
+    logs.setGlobalLoggerProvider(provider);
+    const tracer = new BasicTracerProvider({
+      idGenerator: {
+        generateTraceId: () => TRACE_ID,
+        generateSpanId: () => SPAN_ID,
+      },
+    }).getTracer('test');
+    const span = tracer.startSpan('charge');
+
+    const quiet = captureLogger('payment');
+    context.with(trace.setSpan(ROOT_CONTEXT, span), () => {
+      quiet.logger.info({ route: 'charge' }, 'charge requested');
+    });
+    expect(exporter.getFinishedLogRecords()).toHaveLength(0);
+    expect(quiet.lines[0]).toMatchObject({ trace_id: TRACE_ID, span_id: SPAN_ID });
+
+    process.env.OTEL_LOGS_EXPORTER = 'otlp';
+    const forwarded = captureLogger('payment');
+    context.with(trace.setSpan(ROOT_CONTEXT, span), () => {
+      forwarded.logger.info({ route: 'charge' }, 'charge requested');
+    });
+    span.end();
+
+    expect(forwarded.lines[0]).toMatchObject({
+      trace_id: TRACE_ID,
+      span_id: SPAN_ID,
+      msg: 'charge requested',
+      service: 'payment',
+    });
+    const records = exporter.getFinishedLogRecords();
+    expect(records).toHaveLength(1);
+    expect(records[0]?.spanContext?.traceId).toBe(TRACE_ID);
+    expect(records[0]?.spanContext?.spanId).toBe(SPAN_ID);
+    expect(records[0]?.body).toBe('charge requested');
+    expect(records[0]?.attributes).toMatchObject({
+      service: 'payment',
+      trace_id: TRACE_ID,
+      span_id: SPAN_ID,
+      route: 'charge',
+    });
+  });
+
+  it('fills trace_id and span_id from the Cloud Logging fields', () => {
+    logs.setGlobalLoggerProvider(provider);
+    process.env.OTEL_LOGS_EXPORTER = 'otlp';
+    const tracer = new BasicTracerProvider({
+      idGenerator: {
+        generateTraceId: () => TRACE_ID,
+        generateSpanId: () => SPAN_ID,
+      },
+    }).getTracer('test');
+    const span = tracer.startSpan('charge');
+    const { logger, lines } = captureLogger('payment', {
+      format: 'gcp',
+      gcpProjectId: 'otel-demo-spike',
+    });
+    context.with(trace.setSpan(ROOT_CONTEXT, span), () => {
+      logger.info('charge requested');
+    });
+    span.end();
+
+    expect(lines[0]).not.toHaveProperty('trace_id');
+    expect(lines[0]).not.toHaveProperty('span_id');
+    const records = exporter.getFinishedLogRecords();
+    expect(records).toHaveLength(1);
+    expect(records[0]?.spanContext?.traceId).toBe(TRACE_ID);
+    expect(records[0]?.spanContext?.spanId).toBe(SPAN_ID);
+    expect(records[0]?.attributes).toMatchObject({
+      trace_id: TRACE_ID,
+      span_id: SPAN_ID,
+    });
+  });
+
+  it('does not export when the SDK is disabled', () => {
+    logs.setGlobalLoggerProvider(provider);
+    process.env.OTEL_LOGS_EXPORTER = 'otlp';
+    process.env.OTEL_SDK_DISABLED = 'true';
+    const { logger } = captureLogger('payment');
+    logger.info('stays on stdout');
+    expect(exporter.getFinishedLogRecords()).toHaveLength(0);
   });
 });

@@ -30,7 +30,8 @@ loadgen                open-loop shop load, fixed arrival rate, UTC spikes
 infra/aws              CDK demo stack, teardown, deploy guard, SSM fault-switch reader
 infra/gcp              GCP spike: Terraform for one Cloud Run service, pluggable fault switch
 docs                   architecture, telemetry, and teardown runbook
-docker-compose.yml     local Postgres and the four services
+docker-compose.yml     local Postgres, the four services, and the collector
+otel/                  collector configs (debug, and Logz.io when selected)
 ```
 
 `results/` and `raw/` are local experiment output and are gitignored.
@@ -150,6 +151,111 @@ npm run seed
 
 `npm run seed` drops and recreates each service schema, then inserts 1000 deterministic Israeli customers, the electronics catalog, and warehouse stock. Running it again replaces a partially filled database with that same data. The Postgres container trusts local connections; do not reuse that setting outside this compose file.
 
+Postgres data lives on the `postgres-data` volume. A restart or `docker compose down` keeps it. `docker compose down -v` is what deletes it. Seed does not run on container start.
+
+## Run locally with Logz.io
+
+Local compose sends every service's traces, metrics, and logs to an OpenTelemetry collector. The collector can print them, or forward them to Logz.io when you give it tokens. Nothing is sampled.
+
+### Prerequisites
+
+- Docker with Compose v2.
+- Node.js 22 and `npm install` at the repo root. `npm run seed` runs on the host, not in a container.
+- A Logz.io account only if you want the data to leave the machine. With the tokens left empty, the collector still starts and its debug exporter prints traces, logs, and metrics.
+
+### Configure
+
+```bash
+cp .env.example .env
+```
+
+Compose reads `.env` for the collector and the load rate. `.env` is gitignored. `.env.example` is the only env file that belongs in git, and it has placeholders. This repository is public. Do not commit real tokens, and do not paste them into a pull request or a log.
+
+In Logz.io, open the gear menu, then Settings, then Manage tokens, then Data shipping tokens:
+
+| Token                  | Settings tab | Env var                |
+| ---------------------- | ------------ | ---------------------- |
+| Tracing shipping token | Tracing      | `LOGZIO_TRACING_TOKEN` |
+| Logs shipping token    | Logs         | `LOGZIO_LOGS_TOKEN`    |
+| Metrics shipping token | Metrics      | `LOGZIO_METRICS_TOKEN` |
+
+The listener host is on that same page, and in the account region table (Settings, or the Logz.io regions page). The region code is `us`, `eu`, `au`, `ca`, `uk`, `nl`, or `wa`. The example file uses the US listeners. An EU account uses `otlp-listener-eu.logz.io` and `listener-eu.logz.io`. Put the hosts in `LOGZIO_TRACES_ENDPOINT`, `LOGZIO_LOGS_ENDPOINT`, and `LOGZIO_METRICS_ENDPOINT`, and set `LOGZIO_REGION` to the region code.
+
+Two collector configs, both in the repo:
+
+- `otel/collector.yaml` is the default (`OTEL_COLLECTOR_CONFIG=/etc/otelcol-contrib/config.yaml`). It receives OTLP gRPC on `:4317` and OTLP HTTP on `:4318` (every interface; collector 0.128 would otherwise bind localhost, which the other containers cannot reach), and exports only to the debug exporter. No tokens.
+- `otel/collector-logzio.yaml` keeps that debug exporter and adds Logz.io. After the three tokens are filled, set `OTEL_COLLECTOR_CONFIG=/etc/otelcol-contrib/collector-logzio.yaml`.
+
+Traces and logs go to Logz.io over OTLP/HTTP. Metrics go via `prometheusremotewrite`. Each trace and log exporter has `retry_on_failure` (it keeps retrying: `max_elapsed_time` is 0) and a `sending_queue` stored with `file_storage` on the `otel-collector-queue` volume. A flaky connection does not drop spans that have already reached the collector. The Prometheus remote-write exporter does not accept `sending_queue` or `file_storage`. It uses `retry_on_failure`, `remote_write_queue`, and a write-ahead log on that same volume.
+
+The collector image runs as uid 10001, which cannot create files on a fresh named volume. A one-shot init container creates the queue directories and hands them to that user. The collector process is not root. The image also has no shell, so a small busybox container shares its network and is the healthcheck the services wait for (`http://localhost:13133`).
+
+There is no sampling processor. The services use an AlwaysOn sampler. At this rate, every span is kept.
+
+### Commands
+
+Start Postgres, the collector, and the four services. The load generator stays off until you ask for it.
+
+```bash
+docker compose up -d --build
+```
+
+Wait until the services are healthy (`docker compose ps`). Then seed. This drops and recreates shop and inventory data. It is not part of container startup, so a later restart does not wipe orders. Run it again only when you want that data rebuilt.
+
+```bash
+SHOP_DATABASE_URL=postgres://otel@localhost:5432/shop \
+INVENTORY_DATABASE_URL=postgres://otel@localhost:5432/inventory \
+PAYMENT_DATABASE_URL=postgres://otel@localhost:5432/payment \
+DELIVERY_DATABASE_URL=postgres://otel@localhost:5432/delivery \
+npm run seed
+```
+
+Start the load. The default is about 1 cart activity per minute, continuously, with browse, checkout, and order-status scaled by the same factor as `loadgen/schedule.json` (about 3 checkouts per 100 cart activities). Change `LOADGEN_CARTS_PER_MINUTE` in `.env` to pick another rate. That variable is read only by the load generator. AWS and GCP tasks do not set it, and the services do not read it, so the cloud schedule and its fault windows stay as they are. Local mode flattens the day-night curve and does not pause for warm-up or spike multipliers. It runs for 72 hours from the process start (the same hard cap as the experiment), then stops. Start the container again to continue. `LOADGEN_START_UTC` still pins the start when you set it, for both the generator and the services.
+
+```bash
+docker compose --profile load up -d loadgen
+```
+
+Stop the load generator:
+
+```bash
+docker compose --profile load stop loadgen
+```
+
+Stop the stack and keep Postgres data and the collector queue:
+
+```bash
+docker compose --profile load down
+```
+
+Full reset. This deletes the `postgres-data` and `otel-collector-queue` volumes. The next `up` starts from empty databases, and seed is required again before checkouts.
+
+```bash
+docker compose --profile load down -v
+```
+
+Services, the collector, and the load generator use `restart: unless-stopped`.
+
+### Verify
+
+Without tokens, the debug exporter is the whole pipeline:
+
+```bash
+docker compose logs otel-collector
+```
+
+Traces, logs, and metrics from `shop`, `inventory`, `payment`, and `delivery` should show up. Each service's `service.name` is that short name. Log records carry `trace_id` and `span_id`. On GCP the same correlation is `logging.googleapis.com/trace` and `logging.googleapis.com/spanId` in Cloud Logging. Locally the stdout line keeps `trace_id` and `span_id`, and the OTLP log record's span context is those ids, which is what Logz.io uses to open the trace from a log. The open-loop load generator writes JSON to its own stdout and does not export OTLP. Its compose service still sets `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_SERVICE_NAME=loadgen` for a traced entrypoint (`LOADGEN_TRACING=on` on the cart-tick command).
+
+With the Logz.io config and tokens:
+
+- Tracing: filter `service.name` to `shop`, `inventory`, `payment`, and `delivery`. One checkout is one trace across all four. Nothing is sampled out.
+- Logs: open a line and confirm `trace_id` and `span_id`. That trace id should exist in Tracing.
+- Metrics: names do not have the GCP `workload.googleapis.com/` prefix (PromQL `workload_googleapis_com:`). See [observability/README.md](observability/README.md).
+
+### How much data
+
+At 1 cart per minute the other streams stay in proportion to the checked-in plan, which is about 1.44% of its 100,000 cart activities per day. The 72-hour experiment's planning figure is about 1 million traces. Scaled to this rate and counted as spans, expect about 86,000 spans per day. The collector keeps every one. Compose health probes add a smaller extra stream of `/health` spans on top of that.
+
 ## Run a service
 
 ```bash
@@ -166,7 +272,7 @@ Health checks:
 | payment   | `http://localhost:3003/health` |
 | delivery  | `http://localhost:3004/health` |
 
-Point traces and metrics at a collector with `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4318`). The exporter is OTLP/HTTP. Logs are JSON on stdout and include `trace_id`, `span_id`, an X-Ray-format trace id, `service`, and `orderId` when the request has one.
+Point traces, metrics, and (when `OTEL_LOGS_EXPORTER=otlp`) logs at a collector with `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4318`). The exporter is OTLP/HTTP. Logs are JSON on stdout and include `trace_id`, `span_id`, an X-Ray-format trace id, `service`, and `orderId` when the request has one. Compose sets the endpoint to `http://otel-collector:4318` and turns OTLP logs on. Leave `OTEL_LOGS_EXPORTER` unset on AWS and GCP. Those paths keep stdout logs.
 
 ## Load
 
@@ -181,4 +287,4 @@ SHOP_URL=http://localhost:3001 npm run start -w @otel-demo/loadgen
 
 This repository is public. Do not commit secrets, AWS account ids, ARNs, or IP addresses.
 
-`.gitignore` excludes `.env*`, `results/`, `raw/`, `node_modules/`, `dist/`, `cdk.out/`, `.aws/`, and `*.pem`. Pull requests run gitleaks (`.github/workflows/secret-scan.yml`) with those extra rules. Build and test run in `.github/workflows/ci.yml`.
+`.gitignore` excludes `.env*` except the placeholder `.env.example`, plus `results/`, `raw/`, `node_modules/`, `dist/`, `cdk.out/`, `.aws/`, and `*.pem`. Pull requests run gitleaks (`.github/workflows/secret-scan.yml`) with those extra rules. Build and test run in `.github/workflows/ci.yml`.

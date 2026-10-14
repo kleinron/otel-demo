@@ -1,6 +1,9 @@
 import { metrics, type Meter } from '@opentelemetry/api';
+import { logs } from '@opentelemetry/api-logs';
+import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { BatchLogRecordProcessor, LoggerProvider } from '@opentelemetry/sdk-logs';
 import {
   defaultResource,
   resourceFromAttributes,
@@ -41,9 +44,7 @@ export interface StartTelemetryOptions extends TelemetryOptions {
 export function buildNodeSdkConfiguration(config: TelemetryConfig): Partial<NodeSDKConfiguration> {
   return {
     serviceName: config.serviceName,
-    resource: defaultResource()
-      .merge(resourceFromAttributes(config.resourceAttributes))
-      .merge(resourceFromAttributes(cloudRunAttributes(process.env))),
+    resource: telemetryResource(config),
     autoDetectResources: false,
     instrumentations: [],
     textMapPropagator: createTracePropagator(),
@@ -65,6 +66,9 @@ export function buildNodeSdkConfiguration(config: TelemetryConfig): Partial<Node
           url: config.metricsUrl,
           headers: config.metricsHeaders,
         }),
+        ...(config.metricExportIntervalMillis === undefined
+          ? {}
+          : { exportIntervalMillis: config.metricExportIntervalMillis }),
       }),
     ],
     views: [httpServerDurationView()],
@@ -90,12 +94,43 @@ export function startTelemetry(options: StartTelemetryOptions): TelemetryHandle 
     };
   }
   const sdk = createTelemetrySdk(config);
+  const logProvider = config.logsEnabled ? startLogProvider(config) : undefined;
   sdk.start();
   return {
     config,
     started: true,
-    shutdown: () => sdk.shutdown(),
+    shutdown: async () => {
+      await logProvider?.shutdown();
+      await sdk.shutdown();
+    },
   };
+}
+
+/**
+ * OTLP/HTTP logs on the same endpoint and resource as traces. The pino logger
+ * emits into this provider when `OTEL_LOGS_EXPORTER=otlp`. Unset leaves logs
+ * on stdout only, which is the AWS and GCP path (GCP ships stdout itself).
+ */
+function startLogProvider(config: TelemetryConfig): LoggerProvider {
+  const provider = new LoggerProvider({
+    resource: telemetryResource(config),
+    processors: [
+      new BatchLogRecordProcessor({
+        exporter: new OTLPLogExporter({
+          url: config.logsUrl,
+          headers: config.logsHeaders,
+        }),
+      }),
+    ],
+  });
+  logs.setGlobalLoggerProvider(provider);
+  return provider;
+}
+
+function telemetryResource(config: TelemetryConfig) {
+  return defaultResource()
+    .merge(resourceFromAttributes(config.resourceAttributes))
+    .merge(resourceFromAttributes(cloudRunAttributes(process.env)));
 }
 
 export function getServiceMeter(name: string, version?: string): Meter {

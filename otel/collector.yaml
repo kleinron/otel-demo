@@ -1,0 +1,57 @@
+# Local collector. OTLP in, debug exporter out. No tokens required.
+# Logz.io export is otel/collector-logzio.yaml, selected with OTEL_COLLECTOR_CONFIG.
+# No sampler: the SDK is AlwaysOn, and this file has no probabilistic or tail sampler.
+
+receivers:
+  otlp:
+    protocols:
+      # 0.128 binds an omitted endpoint to localhost, which other containers
+      # cannot reach. ":4317" listens on every interface without an address literal.
+      grpc:
+        endpoint: ':4317'
+      http:
+        endpoint: ':4318'
+
+processors:
+  batch:
+    timeout: 5s
+  # Metrics only. The SDK already limits labels; this drops ids if one slips through.
+  attributes/metrics_drop_ids:
+    actions:
+      - { key: cart.id, action: delete }
+      - { key: order.id, action: delete }
+      - { key: order_id, action: delete }
+      - { key: payment.idempotency_key, action: delete }
+      - { key: url.full, action: delete }
+      - { key: url.path, action: delete }
+  resource/metrics_drop_ids:
+    attributes:
+      - { key: cart.id, action: delete }
+      - { key: order.id, action: delete }
+
+exporters:
+  debug:
+    verbosity: detailed
+
+extensions:
+  health_check:
+    endpoint: localhost:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      processors: [resource/metrics_drop_ids, attributes/metrics_drop_ids, batch]
+      exporters: [debug]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+  telemetry:
+    logs:
+      level: info

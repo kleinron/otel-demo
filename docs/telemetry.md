@@ -6,16 +6,20 @@ Host resource detection is off. A machine address is not attached automatically.
 
 ## Export
 
-| Variable                              | Role                                                                                                 |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `OTEL_EXPORTER_OTLP_ENDPOINT`         | Base URL. Signal paths `/v1/traces` and `/v1/metrics` are appended. Default `http://localhost:4318`. |
-| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`  | Full traces URL. Overrides the base.                                                                 |
-| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | Full metrics URL. Overrides the base.                                                                |
-| `OTEL_EXPORTER_OTLP_HEADERS`          | Shared `key=value` list. Signal-specific header variables override the same key.                     |
-| `OTEL_EXPORTER_OTLP_TRACES_HEADERS`   | Extra traces headers.                                                                                |
-| `OTEL_EXPORTER_OTLP_METRICS_HEADERS`  | Extra metrics headers.                                                                               |
-| `OTEL_EXPORTER_OTLP_PROTOCOL`         | Must be unset or `http/protobuf`.                                                                    |
-| `OTEL_SDK_DISABLED`                   | `true` skips SDK startup.                                                                            |
+| Variable                              | Role                                                                                                              |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`         | Base URL. Signal paths `/v1/traces`, `/v1/metrics`, and `/v1/logs` are appended. Default `http://localhost:4318`. |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`  | Full traces URL. Overrides the base.                                                                              |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | Full metrics URL. Overrides the base.                                                                             |
+| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`    | Full logs URL. Overrides the base. Used only when log export is on.                                               |
+| `OTEL_EXPORTER_OTLP_HEADERS`          | Shared `key=value` list. Signal-specific header variables override the same key.                                  |
+| `OTEL_EXPORTER_OTLP_TRACES_HEADERS`   | Extra traces headers.                                                                                             |
+| `OTEL_EXPORTER_OTLP_METRICS_HEADERS`  | Extra metrics headers.                                                                                            |
+| `OTEL_EXPORTER_OTLP_LOGS_HEADERS`     | Extra logs headers.                                                                                               |
+| `OTEL_EXPORTER_OTLP_PROTOCOL`         | Must be unset or `http/protobuf`, including the logs protocol variable.                                           |
+| `OTEL_LOGS_EXPORTER`                  | `otlp` copies each JSON log line to the collector. Unset or `none` keeps stdout only.                             |
+| `OTEL_METRIC_EXPORT_INTERVAL`         | Metric export interval in milliseconds, at least 1000. Unset keeps the SDK default of 60s.                        |
+| `OTEL_SDK_DISABLED`                   | `true` skips SDK startup, including log export.                                                                   |
 
 ## Resource
 
@@ -44,6 +48,8 @@ Present when a valid span is active: `trace_id`, `span_id`, and `xray_trace_id`.
 | `CLOUD_PROVIDER` | `aws`. Trace ids use the X-Ray form (first 8 hex characters are unix seconds). The log line keeps `xray_trace_id`. | Standard W3C random trace ids (16 random bytes, no time prefix). The default log shape drops `xray_trace_id`.                                                                                                                               |
 
 `GCP_PROJECT_ID` is the project id in the Cloud Logging trace field. It has to be a project id (lowercase letters, digits, hyphens). Without it, a `LOG_FORMAT=gcp` line still has `severity` and `message` but omits the trace link. See [gcp-spike.md](gcp-spike.md).
+
+`OTEL_LOGS_EXPORTER=otlp` also sends each line to the collector as an OTLP log. The stdout line is unchanged. The log record's span context is the active span, or, if there is no active span, the `trace_id` and `span_id` on the line. A `LOG_FORMAT=gcp` line has no `trace_id` field; the exporter reads `logging.googleapis.com/trace` and `logging.googleapis.com/spanId` and still sets `trace_id` and `span_id` on the OTLP record. Unset `OTEL_LOGS_EXPORTER` does not open a logs exporter. AWS and GCP leave it unset. Local compose sets it.
 
 Present when the log call or `withOrderId` set it: `orderId`. An explicit log field wins over the context value.
 
@@ -124,7 +130,7 @@ A successful read of `off` logs `faults off by operator` once for that transitio
 
 `loadFaultInjectionConfig` is unchanged: it still returns an empty list unless `OTEL_DEMO_FAULTS_ENABLED` is set, and it does not apply faults.
 
-Each service calls `startServiceFaultControl` with its own name. When `OTEL_DEMO_LOAD_SCHEDULE_FILE` is set, that file replaces the single fault window: each spike's fault block becomes its own UTC window, the first spike of the experiment stays a baseline with no fault, and only windows for that service are armed. A missing or unreadable file fails startup. The single-window `OTEL_DEMO_FAULTS` list is not used while the load schedule is set. Startup logs `fault schedule loaded` with the service and its operations. The kill switch is still required and is polled. On AWS the task sets `FAULT_SWITCH_SOURCE=module` so the poll reads SSM (`OTEL_DEMO_FAULTS_PARAMETER`, default `/otel-demo/faults-enabled`) instead of a value captured once at process start. `LOADGEN_START_UTC` and `LOADGEN_SEED` override the file for both the generator and the services. A database `timeout` fault fails the SQL call before the driver and records `outcome=timeout`. `ping` is not faulted. Window start and end are logged in UTC. A process that starts inside a window does not log that start again. An injected fault sets `fault.injected` on the span and on the access log.
+Each service calls `startServiceFaultControl` with its own name. When `OTEL_DEMO_LOAD_SCHEDULE_FILE` is set, that file replaces the single fault window: each spike's fault block becomes its own UTC window, the first spike of the experiment stays a baseline with no fault, and only windows for that service are armed. A missing or unreadable file fails startup. The single-window `OTEL_DEMO_FAULTS` list is not used while the load schedule is set. Startup logs `fault schedule loaded` with the service and its operations. The kill switch is still required and is polled. On AWS the task sets `FAULT_SWITCH_SOURCE=module` so the poll reads SSM (`OTEL_DEMO_FAULTS_PARAMETER`, default `/otel-demo/faults-enabled`) instead of a value captured once at process start. `LOADGEN_START_UTC` and `LOADGEN_SEED` override the file for both the generator and the services. `LOADGEN_CARTS_PER_MINUTE` is read only by the load generator. It scales cart activities to that many per minute and scales the other streams by the same factor, with a flat curve. Services do not read it, so fault windows stay on the file. Unset, the generator follows the file, which is the AWS and GCP path. A database `timeout` fault fails the SQL call before the driver and records `outcome=timeout`. `ping` is not faulted. Window start and end are logged in UTC. A process that starts inside a window does not log that start again. An injected fault sets `fault.injected` on the span and on the access log.
 
 ## Service ports
 

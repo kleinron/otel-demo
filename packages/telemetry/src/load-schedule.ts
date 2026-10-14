@@ -81,6 +81,11 @@ export interface LoadSchedule {
     fraction: number;
   };
   spikes: readonly SpikeTemplate[];
+  /**
+   * Local steady mode. The diurnal curve is already flat. Warm-up and spike
+   * multipliers do not change the arrival rate. Unset on the checked-in file.
+   */
+  steady?: boolean;
 }
 
 export interface ResolvedFault {
@@ -313,6 +318,8 @@ export function baseCurvePerSecond(schedule: LoadSchedule, stream: Stream, utcMs
  * Arrival rate for one stream at an absolute instant. Zero during warm-up and
  * outside the experiment. Spike multipliers apply only inside that spike.
  * The sum of streams is clamped to the rate cap.
+ * `schedule.steady` (the local cart rate) skips the warm-up gap and the spike
+ * multipliers so the rate stays flat. Fault windows in the file are unchanged.
  */
 export function arrivalRatePerSecond(plan: LoadPlan, stream: Stream, utcMs: number): number {
   return cappedRates(plan, utcMs)[stream];
@@ -534,12 +541,65 @@ function cappedRates(plan: LoadPlan, utcMs: number): Record<Stream, number> {
 }
 
 function rawRate(plan: LoadPlan, stream: Stream, utcMs: number): number {
-  if (utcMs < plan.startMs || utcMs >= plan.hardStopMs || inWarmup(plan, utcMs)) {
+  if (utcMs < plan.startMs || utcMs >= plan.hardStopMs) {
     return 0;
   }
-  const spike = spikeAt(plan, utcMs);
+  if (!plan.schedule.steady && inWarmup(plan, utcMs)) {
+    return 0;
+  }
+  const spike = plan.schedule.steady ? undefined : spikeAt(plan, utcMs);
   const multiplier = spike?.multiplier ?? 1;
   return baseCurvePerSecond(plan.schedule, stream, utcMs) * multiplier;
+}
+
+const MINUTES_PER_DAY = 24 * 60;
+
+/**
+ * Local arrival rate. `LOADGEN_CARTS_PER_MINUTE` scales cart activities to
+ * that many per minute and scales checkout, browse, and order-status by the
+ * same factor as the checked-in file (rounded to a whole activity per day).
+ * The curve is flat: amplitude 0, and warm-up and spike multipliers do not
+ * change the rate. When `LOADGEN_START_UTC` is unset, the run starts at
+ * `nowMs` so a local process is not stuck on the experiment calendar.
+ * Unset or blank leaves the schedule untouched, which is the AWS and GCP path.
+ * Services do not call this. Fault windows stay on `applyRuntimeOverrides`.
+ */
+export function applyLocalCartRate(
+  schedule: LoadSchedule,
+  env: Record<string, string | undefined>,
+  nowMs = Date.now(),
+): LoadSchedule {
+  const raw = env.LOADGEN_CARTS_PER_MINUTE?.trim() ?? '';
+  if (raw === '') {
+    return schedule;
+  }
+  const cartsPerMinute = Number(raw);
+  if (!Number.isFinite(cartsPerMinute) || cartsPerMinute <= 0) {
+    throw new Error('LOADGEN_CARTS_PER_MINUTE must be a positive number');
+  }
+  const cartActivitiesPerDay = Math.round(cartsPerMinute * MINUTES_PER_DAY);
+  if (cartActivitiesPerDay < 1) {
+    throw new Error('LOADGEN_CARTS_PER_MINUTE is too small to schedule one cart activity per day');
+  }
+  const scale = cartActivitiesPerDay / schedule.curve.cartActivitiesPerDay;
+  const scaled = (value: number): number => Math.max(1, Math.round(value * scale));
+  const startPinned = Boolean(env.LOADGEN_START_UTC?.trim());
+  return {
+    ...schedule,
+    steady: true,
+    curve: {
+      ...schedule.curve,
+      amplitude: 0,
+      cartActivitiesPerDay,
+      checkoutsPerDay: scaled(schedule.curve.checkoutsPerDay),
+      browsePerDay: scaled(schedule.curve.browsePerDay),
+      orderStatusPerDay: scaled(schedule.curve.orderStatusPerDay),
+    },
+    experiment: {
+      ...schedule.experiment,
+      start: startPinned ? schedule.experiment.start : new Date(nowMs).toISOString(),
+    },
+  };
 }
 
 function sampleCount(

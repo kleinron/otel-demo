@@ -1,5 +1,6 @@
-# Local environment and secrets
+# Local environment and secrets. .env.example is the committed placeholder.
 .env*
+!.env.example
 
 # Experiment outputs (kept off the public remote)
 results/

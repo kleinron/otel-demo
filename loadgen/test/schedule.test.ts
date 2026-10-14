@@ -4,7 +4,9 @@ import { describe, expect, it } from 'vitest';
 import { customerAt, SEED_CUSTOMER_COUNT } from '../../services/shop/src/customers.ts';
 import { CATALOG, stockOnHand } from '../../services/inventory/src/catalog.ts';
 import {
+  applyLocalCartRate,
   applyRuntimeOverrides,
+  arrivalRatePerSecond,
   baseCurvePerSecond,
   buildPlan,
   customerId,
@@ -163,6 +165,84 @@ describe('checked-in schedule', () => {
     });
     expect(overridden?.schedule.experiment.start).toBe(pinned);
     expect(overridden?.startMs).toBe(Date.parse(pinned));
+  });
+
+  it('keeps the cloud schedule when the local cart rate is set on the service path', () => {
+    const fromFile = loadPlanFromEnv({
+      OTEL_DEMO_LOAD_SCHEDULE_FILE: fileURLToPath(new URL('../schedule.json', import.meta.url)),
+      LOADGEN_CARTS_PER_MINUTE: '1',
+    });
+    expect(fromFile?.schedule.curve.cartActivitiesPerDay).toBe(100_000);
+    expect(fromFile?.schedule.steady).toBeUndefined();
+    expect(applyRuntimeOverrides(schedule, { LOADGEN_CARTS_PER_MINUTE: '1' }).curve).toEqual(
+      schedule.curve,
+    );
+  });
+});
+
+describe('local cart rate', () => {
+  const now = Date.parse('2030-01-02T03:04:05.000Z');
+
+  it('leaves the schedule untouched when the env is unset', () => {
+    expect(applyLocalCartRate(schedule, {})).toBe(schedule);
+    expect(applyLocalCartRate(schedule, { LOADGEN_CARTS_PER_MINUTE: '   ' })).toBe(schedule);
+  });
+
+  it('runs about one cart per minute, with the other streams in proportion', () => {
+    const carts = schedule.curve.cartActivitiesPerDay;
+    const scaled = applyLocalCartRate(
+      applyRuntimeOverrides(schedule, { LOADGEN_START_UTC: schedule.experiment.start }),
+      { LOADGEN_CARTS_PER_MINUTE: '1', LOADGEN_START_UTC: schedule.experiment.start },
+      now,
+    );
+    expect(schedule.curve.cartActivitiesPerDay).toBe(carts);
+    expect(schedule.steady).toBeUndefined();
+    expect(scaled.steady).toBe(true);
+    expect(scaled.curve.amplitude).toBe(0);
+    expect(scaled.curve.cartActivitiesPerDay).toBe(1440);
+    expect(scaled.curve.checkoutsPerDay).toBe(43);
+    expect(scaled.curve.browsePerDay).toBe(1296);
+    expect(scaled.curve.orderStatusPerDay).toBe(86);
+    expect(scaled.experiment.start).toBe(schedule.experiment.start);
+    expect(scaled.curve.checkoutsPerDay / scaled.curve.cartActivitiesPerDay).toBeCloseTo(
+      schedule.curve.checkoutsPerDay / schedule.curve.cartActivitiesPerDay,
+      2,
+    );
+
+    const plan = buildPlan(scaled);
+    const perSecond = 1440 / SECONDS_PER_DAY;
+    const flat = Date.parse('2026-10-12T08:40:00.000Z');
+    const warmup = Date.parse('2026-10-12T09:57:00.000Z');
+    const spike = Date.parse('2026-10-12T12:05:00.000Z');
+    expect(arrivalRatePerSecond(plan, 'cart', flat)).toBeCloseTo(perSecond, 10);
+    expect(arrivalRatePerSecond(plan, 'cart', warmup)).toBeCloseTo(perSecond, 10);
+    expect(arrivalRatePerSecond(plan, 'cart', spike)).toBeCloseTo(perSecond, 10);
+    expect(arrivalRatePerSecond(plan, 'checkout', flat) * 60).toBeCloseTo(
+      (43 / SECONDS_PER_DAY) * 60,
+      8,
+    );
+  });
+
+  it('starts at now unless LOADGEN_START_UTC is already applied', () => {
+    const moved = applyLocalCartRate(schedule, { LOADGEN_CARTS_PER_MINUTE: '1' }, now);
+    expect(moved.experiment.start).toBe('2030-01-02T03:04:05.000Z');
+    const pinned = '2031-05-06T07:08:09.000Z';
+    const kept = applyLocalCartRate(
+      applyRuntimeOverrides(schedule, { LOADGEN_START_UTC: pinned }),
+      { LOADGEN_CARTS_PER_MINUTE: '1', LOADGEN_START_UTC: pinned },
+      now,
+    );
+    expect(kept.experiment.start).toBe(pinned);
+    expect(kept.curve.cartActivitiesPerDay).toBe(1440);
+  });
+
+  it('rejects a rate that is not a positive number', () => {
+    expect(() => applyLocalCartRate(schedule, { LOADGEN_CARTS_PER_MINUTE: '0' })).toThrow(
+      /positive/,
+    );
+    expect(() => applyLocalCartRate(schedule, { LOADGEN_CARTS_PER_MINUTE: 'nope' })).toThrow(
+      /positive/,
+    );
   });
 });
 
