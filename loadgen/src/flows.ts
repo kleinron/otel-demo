@@ -77,6 +77,20 @@ async function cartActivity(arrival: Arrival, ctx: FlowContext): Promise<void> {
   const remove =
     unitFromSeed(ctx.seed, [arrival.stream, arrival.slotStartMs, arrival.index, 'remove']) <
     CART_REMOVE_FRACTION;
+  // Local carts are touched about once, so a remove with nothing in the cart
+  // never reaches add-to-cart. Add first, then remove the same line.
+  if (ctx.plan.schedule.steady) {
+    await ctx.client.request({
+      flowId: flowId(arrival),
+      operation: 'add-to-cart',
+      method: 'POST',
+      path: `/carts/${encodeURIComponent(cartId)}/items`,
+      body: { sku, qty: 1 },
+    });
+    if (!remove) {
+      return;
+    }
+  }
   if (remove) {
     await ctx.client.request({
       flowId: flowId(arrival),

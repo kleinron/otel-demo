@@ -41,7 +41,7 @@ processors:
 
 exporters:
   debug:
-    verbosity: detailed
+    verbosity: basic
   otlphttp/logzio_traces:
     endpoint: ${env:LOGZIO_TRACES_ENDPOINT}
     headers:
@@ -89,6 +89,10 @@ exporters:
     target_info:
       enabled: false
     timeout: 30s
+    # Request parallelism. Leaving remote_write_queue.num_consumers unset keeps
+    # the default of 5, which is the only value that does not warn. Any other
+    # value logs that num_consumers will later mean queue workers instead.
+    max_batch_request_parallelism: 5
     retry_on_failure:
       enabled: true
       initial_interval: 5s
@@ -97,7 +101,6 @@ exporters:
     remote_write_queue:
       enabled: true
       queue_size: 5000
-      num_consumers: 4
     wal:
       directory: /var/lib/otelcol/file_storage/metrics
 
@@ -132,3 +135,11 @@ service:
   telemetry:
     logs:
       level: info
+    metrics:
+      level: detailed
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: ''
+                port: 8888

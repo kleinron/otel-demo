@@ -49,4 +49,24 @@ describe('shop', () => {
     expect(seen).toEqual(['unmatched', '/health', '/cart/items/:id']);
     await app.close();
   });
+
+  it('reports ready only when the database check passes', async () => {
+    const down = buildApp({
+      ready: async () => false,
+    });
+    const unavailable = await down.inject({ method: 'GET', url: '/ready' });
+    expect(unavailable.statusCode).toBe(503);
+    expect(unavailable.json()).toEqual({ status: 'database_unavailable', service: SERVICE_NAME });
+    await down.close();
+
+    const up = buildApp({
+      ready: async () => true,
+    });
+    const ready = await up.inject({ method: 'GET', url: '/ready' });
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json()).toEqual({ status: 'ready', service: SERVICE_NAME });
+    const health = await up.inject({ method: 'GET', url: '/health' });
+    expect(health.statusCode).toBe(200);
+    await up.close();
+  });
 });
