@@ -179,7 +179,21 @@ In Logz.io, open the gear menu, then Settings, then Manage tokens, then Data shi
 | Logs shipping token    | Logs         | `LOGZIO_LOGS_TOKEN`    |
 | Metrics shipping token | Metrics      | `LOGZIO_METRICS_TOKEN` |
 
-The listener host is on that same page, and in the account region table (Settings, or the Logz.io regions page). The region code is `us`, `eu`, `au`, `ca`, `uk`, `nl`, or `wa`. The example file uses the US listeners. An EU account uses `otlp-listener-eu.logz.io` and `listener-eu.logz.io`. Put the hosts in `LOGZIO_TRACES_ENDPOINT`, `LOGZIO_LOGS_ENDPOINT`, and `LOGZIO_METRICS_ENDPOINT`, and set `LOGZIO_REGION` to the region code.
+The listener host is on that same page, and in the account region table (Settings, or the Logz.io regions page). The region code is `us`, `eu`, `au`, `ca`, `uk`, `nl`, or `wa`. Set `LOGZIO_REGION` to that code.
+
+Traces and logs use the OTLP listener, which is the bare host on port 443. The collector appends `/v1/traces` and `/v1/logs`. Port `:4318` does not answer. Metrics use the Prometheus listener on port `8053`. The US hosts have no region suffix. Every other region inserts the code: `otlp-listener-<region>.logz.io` and `listener-<region>.logz.io`.
+
+| Region | `LOGZIO_TRACES_ENDPOINT` and `LOGZIO_LOGS_ENDPOINT` | `LOGZIO_METRICS_ENDPOINT`          |
+| ------ | --------------------------------------------------- | ---------------------------------- |
+| us     | `https://otlp-listener.logz.io`                     | `https://listener.logz.io:8053`    |
+| eu     | `https://otlp-listener-eu.logz.io`                  | `https://listener-eu.logz.io:8053` |
+| au     | `https://otlp-listener-au.logz.io`                  | `https://listener-au.logz.io:8053` |
+| ca     | `https://otlp-listener-ca.logz.io`                  | `https://listener-ca.logz.io:8053` |
+| uk     | `https://otlp-listener-uk.logz.io`                  | `https://listener-uk.logz.io:8053` |
+| nl     | `https://otlp-listener-nl.logz.io`                  | `https://listener-nl.logz.io:8053` |
+| wa     | `https://otlp-listener-wa.logz.io`                  | `https://listener-wa.logz.io:8053` |
+
+`.env.example` fills in the US hosts. An EU account uses the `eu` row.
 
 Two collector configs, both in the repo:
 
@@ -210,7 +224,7 @@ DELIVERY_DATABASE_URL=postgres://otel@localhost:5432/delivery \
 npm run seed
 ```
 
-Start the load. The default is about 1 cart activity per minute, continuously, with browse, checkout, and order-status scaled by the same factor as `loadgen/schedule.json` (about 3 checkouts per 100 cart activities). Change `LOADGEN_CARTS_PER_MINUTE` in `.env` to pick another rate. That variable is read only by the load generator. AWS and GCP tasks do not set it, and the services do not read it, so the cloud schedule and its fault windows stay as they are. Local mode flattens the day-night curve and does not pause for warm-up or spike multipliers. It runs for 72 hours from the process start (the same hard cap as the experiment), then stops. Start the container again to continue. `LOADGEN_START_UTC` still pins the start when you set it, for both the generator and the services.
+Start the load. The default is one cart activity per minute, spaced evenly, with browse, checkout, and order-status in the same proportion as `loadgen/schedule.json` (about 3 checkouts per 100 cart activities, so every hour includes a checkout). Each local cart activity adds an item, and about 30% of them then remove that line. A checkout is its own flow: a new cart, an add, then payment and delivery. Change `LOADGEN_CARTS_PER_MINUTE` in `.env` to pick another rate. That variable is read only by the load generator. AWS and GCP tasks do not set it, and the services do not read it, so the cloud schedule and its fault windows stay as they are. Local mode flattens the day-night curve and does not pause for warm-up or spike multipliers. A late wake still emits the seconds it missed, so a stall does not thin the hour out. It runs for 72 hours from the process start (the same hard cap as the experiment), then stops. Start the container again to continue. `LOADGEN_START_UTC` still pins the start when you set it, for both the generator and the services.
 
 ```bash
 docker compose --profile load up -d loadgen
@@ -246,15 +260,24 @@ docker compose logs otel-collector
 
 Traces, logs, and metrics from `shop`, `inventory`, `payment`, and `delivery` should show up. Each service's `service.name` is that short name. Log records carry `trace_id` and `span_id`. On GCP the same correlation is `logging.googleapis.com/trace` and `logging.googleapis.com/spanId` in Cloud Logging. Locally the stdout line keeps `trace_id` and `span_id`, and the OTLP log record's span context is those ids, which is what Logz.io uses to open the trace from a log. The open-loop load generator writes JSON to its own stdout and does not export OTLP. Its compose service still sets `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_SERVICE_NAME=loadgen` for a traced entrypoint (`LOADGEN_TRACING=on` on the cart-tick command).
 
+Collector self-metrics listen on port 8888 inside the compose network (`detailed` level, every interface). They are not published on the host. From a service container:
+
+```bash
+docker compose exec shop node -e "fetch('http://otel-collector:8888/metrics').then((r)=>r.text()).then((t)=>console.log(t))"
+```
+
+`otelcol_exporter_sent_spans_total`, `otelcol_exporter_sent_log_records_total`, and `otelcol_exporter_sent_metric_points_total` count batches the exporter accepted. `otelcol_exporter_send_failed_spans_total` and the matching `send_failed` series for log records and metric points count exports that failed. The label `exporter` is `debug` or the Logz.io exporter id (`otlphttp/logzio_traces`, `otlphttp/logzio_logs`, `prometheusremotewrite/logzio`). Sent climbing and send_failed staying put means that exporter is delivering. send_failed climbing means the listener, the token, or the port is wrong. The debug exporter's sent count should move even with no tokens.
+
 With the Logz.io config and tokens:
 
 - Tracing: filter `service.name` to `shop`, `inventory`, `payment`, and `delivery`. One checkout is one trace across all four. Nothing is sampled out.
 - Logs: open a line and confirm `trace_id` and `span_id`. That trace id should exist in Tracing.
 - Metrics: names do not have the GCP `workload.googleapis.com/` prefix (PromQL `workload_googleapis_com:`). See [observability/README.md](observability/README.md).
+- Collector: the same `otelcol_exporter_sent_*` series for `otlphttp/logzio_traces` and `prometheusremotewrite/logzio` should increase, and `otelcol_exporter_send_failed_*` should not.
 
 ### How much data
 
-At 1 cart per minute the other streams stay in proportion to the checked-in plan, which is about 1.44% of its 100,000 cart activities per day. The 72-hour experiment's planning figure is about 1 million traces. Scaled to this rate and counted as spans, expect about 86,000 spans per day. The collector keeps every one. Compose health probes add a smaller extra stream of `/health` spans on top of that.
+At 1 cart per minute the other streams stay in proportion to the checked-in plan, which is about 1.44% of its 100,000 cart activities per day. The 72-hour experiment's planning figure is about 1 million traces. Scaled to this rate and counted as spans, expect about 86,000 spans per day. The collector keeps every one. Compose probes `/ready` every 5 seconds. That is one HTTP span plus a `SELECT 1`, smaller than the cart traffic.
 
 ## Run a service
 

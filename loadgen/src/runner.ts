@@ -59,24 +59,38 @@ export function createRunner(options: RunnerOptions): Runner {
         return;
       }
       const due = slotStartAt(options.plan, nowMs);
+      // Steady local mode drains every due second. A late wake would otherwise
+      // keep only the current second and drop the cart that belonged in the gap.
+      // The cloud schedule still fires one slot per tick and does not burst.
+      if (options.plan.schedule.steady) {
+        while (nextSlot <= due && nextSlot < stopAt) {
+          dispatchSlot(nextSlot, nowMs);
+          nextSlot += SLOT_MS;
+        }
+        return;
+      }
       const fire = due >= nextSlot ? due : nextSlot;
       nextSlot = fire + SLOT_MS;
       if (fire >= stopAt) {
         return;
       }
-      for (const arrival of arrivalsInSlot(options.plan, options.seed, fire)) {
-        const delay = Math.max(0, arrival.atMs - nowMs);
-        scheduleAt(delay, () => {
-          void runArrival(arrival, {
-            plan: options.plan,
-            seed: options.seed,
-            client: options.client,
-            state,
-          });
-        });
-      }
+      dispatchSlot(fire, nowMs);
     },
   };
+
+  function dispatchSlot(fire: number, nowMs: number): void {
+    for (const arrival of arrivalsInSlot(options.plan, options.seed, fire)) {
+      const delay = Math.max(0, arrival.atMs - nowMs);
+      scheduleAt(delay, () => {
+        void runArrival(arrival, {
+          plan: options.plan,
+          seed: options.seed,
+          client: options.client,
+          state,
+        });
+      });
+    }
+  }
 }
 
 export async function runUntilStop(

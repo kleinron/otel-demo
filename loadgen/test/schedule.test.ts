@@ -7,6 +7,7 @@ import {
   applyLocalCartRate,
   applyRuntimeOverrides,
   arrivalRatePerSecond,
+  arrivalsInSlot,
   baseCurvePerSecond,
   buildPlan,
   customerId,
@@ -236,6 +237,25 @@ describe('local cart rate', () => {
     expect(kept.curve.cartActivitiesPerDay).toBe(1440);
   });
 
+  it('yields 60 carts an hour and a checkout in every hour, including 07:25 IDT', () => {
+    const morning = Date.parse('2026-10-15T04:25:00.000Z');
+    const scaled = applyLocalCartRate(schedule, { LOADGEN_CARTS_PER_MINUTE: '1' }, morning);
+    const local = buildPlan(scaled);
+    const hour = streamCounts(local, morning, 3600);
+    const later = streamCounts(local, morning + 5 * 3_600_000, 3600);
+    expect(hour.cart).toBe(60);
+    expect(later.cart).toBe(60);
+    expect(hour.checkout).toBeGreaterThan(0);
+    expect(later.checkout).toBeGreaterThan(0);
+    const day = streamCounts(local, morning, SECONDS_PER_DAY);
+    expect(day.checkout / day.cart).toBeCloseTo(
+      scaled.curve.checkoutsPerDay / scaled.curve.cartActivitiesPerDay,
+      5,
+    );
+    expect(arrivalRatePerSecond(plan, 'cart', morning)).toBeGreaterThan(0.2);
+    expect(arrivalRatePerSecond(local, 'cart', morning)).toBeCloseTo(1440 / SECONDS_PER_DAY, 8);
+  });
+
   it('rejects a rate that is not a positive number', () => {
     expect(() => applyLocalCartRate(schedule, { LOADGEN_CARTS_PER_MINUTE: '0' })).toThrow(
       /positive/,
@@ -245,6 +265,21 @@ describe('local cart rate', () => {
     );
   });
 });
+
+function streamCounts(
+  loadPlan: ReturnType<typeof buildPlan>,
+  fromMs: number,
+  seconds: number,
+): Record<'cart' | 'checkout' | 'browse' | 'orderStatus', number> {
+  const counts = { cart: 0, checkout: 0, browse: 0, orderStatus: 0 };
+  for (let step = 0; step < seconds; step += 1) {
+    const slot = fromMs + step * 1000;
+    for (const arrival of arrivalsInSlot(loadPlan, loadPlan.schedule.seed, slot)) {
+      counts[arrival.stream] += 1;
+    }
+  }
+  return counts;
+}
 
 function loadCheckedInSchedule(): LoadSchedule {
   return parseLoadSchedule(

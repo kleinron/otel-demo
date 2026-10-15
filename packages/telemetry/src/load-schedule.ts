@@ -381,11 +381,17 @@ export function arrivalsInSlot(
   if (slotStartMs < plan.startMs || slotStartMs >= plan.hardStopMs) {
     return [];
   }
-  const midpoint = slotStartMs + SLOT_MS / 2;
-  const rates = cappedRates(plan, midpoint);
   const counts = new Map<Stream, number>();
-  for (const stream of STREAMS) {
-    counts.set(stream, sampleCount(rates[stream], seed, stream, slotStartMs));
+  if (plan.schedule.steady) {
+    for (const stream of STREAMS) {
+      counts.set(stream, evenCount(plan, stream, slotStartMs));
+    }
+  } else {
+    const midpoint = slotStartMs + SLOT_MS / 2;
+    const rates = cappedRates(plan, midpoint);
+    for (const stream of STREAMS) {
+      counts.set(stream, sampleCount(rates[stream], seed, stream, slotStartMs));
+    }
   }
   trimCounts(counts, Math.floor(plan.rateCapPerSecond * (SLOT_MS / 1000)));
   const arrivals: Arrival[] = [];
@@ -559,7 +565,9 @@ const MINUTES_PER_DAY = 24 * 60;
  * that many per minute and scales checkout, browse, and order-status by the
  * same factor as the checked-in file (rounded to a whole activity per day).
  * The curve is flat: amplitude 0, and warm-up and spike multipliers do not
- * change the rate. When `LOADGEN_START_UTC` is unset, the run starts at
+ * change the rate. Steady arrivals are spaced evenly across the day, so an
+ * hour holds the hourly share instead of a per-second coin flip that can miss
+ * checkout entirely. When `LOADGEN_START_UTC` is unset, the run starts at
  * `nowMs` so a local process is not stuck on the experiment calendar.
  * Unset or blank leaves the schedule untouched, which is the AWS and GCP path.
  * Services do not call this. Fault windows stay on `applyRuntimeOverrides`.
@@ -600,6 +608,24 @@ export function applyLocalCartRate(
       start: startPinned ? schedule.experiment.start : new Date(nowMs).toISOString(),
     },
   };
+}
+
+/**
+ * One arrival every `86400 / perDay` seconds. A window of N seconds holds
+ * floor((end * perDay) / 86400) - floor((start * perDay) / 86400) arrivals,
+ * so 1440 carts/day is exactly 60 in every hour, and 43 checkouts/day never
+ * leaves a 60-minute gap.
+ */
+function evenCount(plan: LoadPlan, stream: Stream, slotStartMs: number): number {
+  const perDayCount = perDay(plan.schedule, stream);
+  const slot = Math.round((slotStartMs - plan.startMs) / SLOT_MS);
+  if (slot < 0 || perDayCount <= 0) {
+    return 0;
+  }
+  return (
+    Math.floor(((slot + 1) * perDayCount) / SECONDS_PER_DAY) -
+    Math.floor((slot * perDayCount) / SECONDS_PER_DAY)
+  );
 }
 
 function sampleCount(

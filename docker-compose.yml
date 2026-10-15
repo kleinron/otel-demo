@@ -9,15 +9,16 @@
 # stays an explicit step and a restart does not wipe the volume.
 
 x-http-health: &http-health
-  interval: 2s
-  timeout: 2s
-  retries: 20
+  interval: 5s
+  timeout: 5s
+  retries: 12
+  start_period: 15s
   test:
     [
       'CMD',
       'node',
       '-e',
-      "fetch('http://localhost:' + process.env.PORT + '/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+      "fetch('http://localhost:' + process.env.PORT + '/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
     ]
 
 x-otel-env: &otel-env
@@ -71,8 +72,8 @@ services:
       LOGZIO_LOGS_TOKEN: ${LOGZIO_LOGS_TOKEN:-}
       LOGZIO_METRICS_TOKEN: ${LOGZIO_METRICS_TOKEN:-}
       LOGZIO_REGION: ${LOGZIO_REGION:-us}
-      LOGZIO_TRACES_ENDPOINT: ${LOGZIO_TRACES_ENDPOINT:-https://otlp-listener.logz.io:4318}
-      LOGZIO_LOGS_ENDPOINT: ${LOGZIO_LOGS_ENDPOINT:-https://otlp-listener.logz.io:4318}
+      LOGZIO_TRACES_ENDPOINT: ${LOGZIO_TRACES_ENDPOINT:-https://otlp-listener.logz.io}
+      LOGZIO_LOGS_ENDPOINT: ${LOGZIO_LOGS_ENDPOINT:-https://otlp-listener.logz.io}
       LOGZIO_METRICS_ENDPOINT: ${LOGZIO_METRICS_ENDPOINT:-https://listener.logz.io:8053}
     ports:
       - '4317:4317'
